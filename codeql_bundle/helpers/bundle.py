@@ -214,6 +214,62 @@ class CustomBundle(Bundle):
                     yaml.dump(qlpack_spec, fd)
 
                 logging.debug(
+                    f"Determining if standard library CodeQL library pack {target.name} is customizable."
+                )
+                if not (target_copy.path.parent / "Customizations.qll").exists():
+                    logging.debug(
+                        f"Standard library CodeQL pack {target.name} does not have a 'Customizations' library, attempting to add one."
+                    )
+                    # Assume the CodeQL library pack has name `<language>-all`.
+                    target_language = target_copy.get_pack_name().removesuffix("-all")
+                    target_language_library_path = (
+                        target_copy.path.parent / f"{target_language}.qll"
+                    )
+                    logging.debug(
+                        f"Looking for standard library language module {target_language_library_path.name}"
+                    )
+                    if not target_language_library_path.exists():
+                        raise BundleException(
+                            f"Unable to customize {target.name}, because it doesn't have a 'Customizations' library and we cannot determine the language library."
+                        )
+                    logging.debug(
+                        f"Found standard library language module {target_language_library_path.name}, adding import of 'Customizations' library."
+                    )
+                    with target_language_library_path.open("r") as fd:
+                        target_language_library_lines = fd.readlines()
+                    logging.debug(f"Looking for the first import statement.")
+
+                    first_import_idx = None
+                    for idx, line in enumerate(target_language_library_lines):
+                        if line.startswith("import"):
+                            first_import_idx = idx
+                            break
+                    if first_import_idx == None:
+                        raise BundleException(
+                            f"Unable to customize {target.name}, because we cannot determine the first import statement of {target_language_library_path.name}."
+                        )
+                    logging.debug(
+                        "Found first import statement and prepending import statement importing 'Customizations'"
+                    )
+                    target_language_library_lines.insert(
+                        first_import_idx, "import Customizations\n"
+                    )
+                    with target_language_library_path.open("w") as fd:
+                        fd.writelines(target_language_library_lines)
+                    logging.debug(
+                        f"Writing modified language library to {target_language_library_path}"
+                    )
+
+                    target_customization_library_path = (
+                        target_copy.path.parent / "Customizations.qll"
+                    )
+                    logging.debug(
+                        f"Creating Customizations library with import of language {target_language}"
+                    )
+                    with target_customization_library_path.open("w") as fd:
+                        fd.write(f"import {target_language}\n")
+
+                logging.debug(
                     f"Updating 'Customizations.qll' with imports of customization libraries."
                 )
                 with (target_copy.path.parent / "Customizations.qll").open("r") as fd:
