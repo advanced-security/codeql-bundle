@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 @click.command()
 @click.option(
+    "-b",
     "--bundle",
     "bundle_path",
     required=True,
@@ -18,12 +19,14 @@ logger = logging.getLogger(__name__)
     type=click.Path(exists=True, path_type=Path),
 )
 @click.option(
+    "-o",
     "--output",
     required=True,
     help="Path to store the custom CodeQL bundle. Can be a directory or a non-existing archive ending with the extension '.tar.gz'",
     type=click.Path(path_type=Path),
 )
 @click.option(
+    "-w",
     "--workspace",
     help="Path to a directory containing a 'codeql-workspace.yml' file or a path to a 'codeql-workspace.yml' file",
     type=click.Path(exists=True, path_type=Path),
