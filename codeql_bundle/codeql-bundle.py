@@ -61,12 +61,14 @@ def cli(
     if workspace.name == "codeql-workspace.yml":
         workspace = workspace.parent
 
-    logger.debug(f"Creating custom bundle of {bundle_path} with workspace {workspace}")
+    logger.info(
+        f"Creating custom bundle of {bundle_path} using CodeQL packs in workspace {workspace}"
+    )
     bundle = CustomBundle(bundle_path, workspace)
     try:
-        logger.debug(f"Listing CodeQL packs in workspace {workspace}")
+        logger.info(f"Looking for CodeQL packs in workspace {workspace}")
         packs_in_workspace = bundle.codeql.pack_ls(workspace)
-        logger.debug(
+        logger.info(
             f"Found the CodeQL packs: {','.join(map(lambda p: p.name, packs_in_workspace))}"
         )
 
@@ -79,6 +81,9 @@ def cli(
         else:
             selected_packs = packs_in_workspace
 
+        logger.info(
+            f"Considering the following CodeQL packs for inclusion in the custom bundle: {','.join(map(lambda p: p, packs))}"
+        )
         missing_packs = set(packs) - {pack.name for pack in selected_packs}
         if len(missing_packs) > 0:
             logger.fatal(
@@ -86,12 +91,13 @@ def cli(
             )
             sys.exit(1)
 
-        logger.debug(
-            f"Add the packs {','.join(map(lambda p: p.name, selected_packs))} to the custom bundle."
+        logger.info(
+            f"Adding the packs {','.join(map(lambda p: p.name, selected_packs))} to the custom bundle."
         )
         bundle.add_packs(*selected_packs)
-        logger.debug(f"Bundling custom bundle at {output}")
+        logger.info(f"Bundling custom bundle at {output}")
         bundle.bundle(output)
+        logger.info(f"Completed building of custom bundle.")
     except CodeQLException as e:
         logger.fatal(f"Failed executing CodeQL command with reason: '{e}'")
         sys.exit(1)

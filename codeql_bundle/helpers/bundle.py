@@ -23,8 +23,8 @@ class Bundle:
             self.bundle_path = bundle_path
         elif bundle_path.is_file() and bundle_path.name.endswith(".tar.gz"):
             self.tmp_dir = TemporaryDirectory()
-            logging.debug(
-                f"Unpacking provided bundle {bundle_path} to {self.tmp_dir.name}"
+            logging.info(
+                f"Unpacking provided bundle {bundle_path} to {self.tmp_dir.name}."
             )
             file = tarfile.open(bundle_path)
             file.extractall(self.tmp_dir.name)
@@ -34,15 +34,15 @@ class Bundle:
 
         self.codeql = CodeQL(self.bundle_path / "codeql")
         try:
-            logging.debug(f"Validating CodeQL bundle...")
+            logging.info(f"Validating the CodeQL CLI version part of the bundle.")
             version = self.codeql.version()
-            logging.debug(f"Found CodeQL version {version}")
+            logging.info(f"Found CodeQL CLI version {version}.")
         except CodeQLException:
             raise BundleException("Cannot determine CodeQL version!")
 
     def __del__(self) -> None:
         if self.tmp_dir:
-            logging.debug(
+            logging.info(
                 f"Removing temporary directory {self.tmp_dir.name} used to build custom bundle."
             )
             self.tmp_dir.cleanup()
@@ -69,7 +69,7 @@ class CustomBundle(Bundle):
             )
 
     def _validate_pack(self, pack: ResolvedCodeQLPack) -> None:
-        logging.debug(
+        logging.info(
             f"Validating if the CodeQL pack {pack.name} is compliant with the provided bundle."
         )
         for dep_name in pack.dependencies.keys():
@@ -83,9 +83,7 @@ class CustomBundle(Bundle):
                 raise BundleException(
                     f"Package {pack.name} depends on version {pack.dependencies[dep_name]} of pack {dep_pack.name}, but the bundle contains {dep_pack.version}",
                 )
-        logging.debug(
-            f"The CodeQL pack {pack.name}'s dependencies are satisfied by the provided bundle."
-        )
+        logging.info(f"The CodeQL pack {pack.name}'s dependencies are satisfied.")
 
     def add_packs(self, *packs: ResolvedCodeQLPack):
         for pack in packs:
@@ -98,7 +96,7 @@ class CustomBundle(Bundle):
             kind_to_pack_map[pack.kind].append(pack)
 
         for library_pack in kind_to_pack_map[CodeQLPackKind.LIBRARY_PACK]:
-            logging.debug(f"Bundling the library pack {library_pack.name}")
+            logging.info(f"Bundling the library pack {library_pack.name}.")
             self.codeql.pack_bundle(
                 library_pack,
                 self.bundle_path / "qlpacks",
@@ -132,14 +130,12 @@ class CustomBundle(Bundle):
             target_to_customization_pack_map[candidates[0]].append(customization_pack)
 
             for target, customization_packs in target_to_customization_pack_map.items():
-                logging.debug(
+                logging.info(
                     f"Applying customization pack(s) to the standard library pack {target.name}"
                 )
                 # First we bundle each customization pack.
                 for customization_pack in customization_packs:
-                    logging.debug(
-                        f"Applying {customization_pack.name} to {target.name}"
-                    )
+                    logging.info(f"Applying {customization_pack.name} to {target.name}")
                     customization_pack_copy_dir = Path(self.tmp_dir.name)
                     if customization_pack.get_scope() != None:
                         customization_pack_copy_dir = (
@@ -240,7 +236,9 @@ class CustomBundle(Bundle):
                 )
                 self.codeql.pack_bundle(target_copy, self.bundle_path / "qlpacks")
 
-                logging.debug(f"Looking for query packs that need to be recreated.")
+                logging.info(
+                    f"Looking for standard library query packs that need to be recreated."
+                )
                 # Recompile the query packs depending on the target library pack
                 for query_pack in filter(
                     lambda p: p.kind == CodeQLPackKind.QUERY_PACK,
@@ -248,7 +246,7 @@ class CustomBundle(Bundle):
                 ):
                     # Determine if the query pack depends on a library pack we customized.
                     if target.name in query_pack.dependencies:
-                        logging.debug(
+                        logging.info(
                             f"Found query pack {query_pack.name} that is depended on {target.name} and needs to be recreated."
                         )
                         query_pack_copy_dir = (
@@ -327,7 +325,7 @@ class CustomBundle(Bundle):
                             self.bundle_path,
                         )
 
-        logging.debug(f"Looking for query packs that need to be created.")
+        logging.info(f"Looking for workspace query packs that need to be created.")
         for query_pack in kind_to_pack_map[CodeQLPackKind.QUERY_PACK]:
             # Copy the query pack so we can build it independently from the CodeQL workspace it is part of.
             # This prevents cyclic dependency issues if  the workspace has customizations.
@@ -346,7 +344,7 @@ class CustomBundle(Bundle):
             )
             query_pack_copy_path = query_pack_copy_dir / query_pack.path.name
             query_pack_copy = dataclasses.replace(query_pack, path=query_pack_copy_path)
-            logging.debug(f"Creating query pack {query_pack_copy.name}.")
+            logging.info(f"Creating query pack {query_pack_copy.name}.")
             self.codeql.pack_create(
                 query_pack_copy, self.bundle_path / "qlpacks", self.bundle_path
             )
