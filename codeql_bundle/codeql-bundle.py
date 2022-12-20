@@ -56,7 +56,10 @@ def cli(
             level=getattr(logging, loglevel.upper()),
         )
     else:
-        logging.basicConfig(level=getattr(logging, loglevel.upper()))
+        logging.basicConfig(
+            format="%(levelname)s: %(message)s",
+            level=getattr(logging, loglevel.upper()),
+        )
 
     if workspace.name == "codeql-workspace.yml":
         workspace = workspace.parent
