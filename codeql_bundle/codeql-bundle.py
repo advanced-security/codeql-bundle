@@ -29,9 +29,25 @@ logger = logging.getLogger(__name__)
     type=click.Path(exists=True, path_type=Path),
     default=Path.cwd(),
 )
+@click.option(
+    "-l",
+    "--log",
+    "loglevel",
+    type=click.Choice(
+        ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"], case_sensitive=False
+    ),
+    default="WARNING",
+)
 @click.argument("packs", nargs=-1, required=True)
-def cli(bundle_path: Path, output: Path, workspace: Path, packs: List[str]) -> None:
-    logging.basicConfig(level=logging.DEBUG)
+def cli(
+    bundle_path: Path,
+    output: Path,
+    workspace: Path,
+    loglevel: str,
+    packs: List[str],
+) -> None:
+
+    logging.basicConfig(level=getattr(logging, loglevel.upper()))
 
     if workspace.name == "codeql-workspace.yml":
         workspace = workspace.parent
