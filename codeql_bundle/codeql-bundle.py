@@ -85,7 +85,7 @@ def cli(
             selected_packs = packs_in_workspace
 
         logger.info(
-            f"Considering the following CodeQL packs for inclusion in the custom bundle: {','.join(map(lambda p: p, packs))}"
+            f"Considering the following CodeQL packs for inclusion in the custom bundle: {','.join(map(lambda p: p.name, selected_packs))}"
         )
         missing_packs = set(packs) - {pack.name for pack in selected_packs}
         if len(missing_packs) > 0:
