@@ -67,8 +67,9 @@ def main(
     logger.info(
         f"Creating custom bundle of {bundle_path} using CodeQL packs in workspace {workspace}"
     )
-    bundle = CustomBundle(bundle_path, workspace)
+
     try:
+        bundle = CustomBundle(bundle_path, workspace)
         logger.info(f"Looking for CodeQL packs in workspace {workspace}")
         packs_in_workspace = bundle.codeql.pack_ls(workspace)
         logger.info(
