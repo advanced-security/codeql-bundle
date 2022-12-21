@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "codeql-bundle"
 version = "0.1.0"
-description = ""
+description = "Tool to create custom CodeQL bundles"
 authors = ["Remco Vermeulen <rvermeulen@users.noreply.github.com>"]
 readme = "README.md"
 packages = [{include = "codeql_bundle"}]
