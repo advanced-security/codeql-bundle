@@ -5,6 +5,8 @@ description = "Tool to create custom CodeQL bundles"
 authors = ["Remco Vermeulen <rvermeulen@users.noreply.github.com>"]
 readme = "README.md"
 packages = [{include = "codeql_bundle"}]
+license = "MIT"
+repository = "https://github.com/rvermeulen/codeql-bundle"
 
 [tool.poetry.dependencies]
 python = "^3.11"
