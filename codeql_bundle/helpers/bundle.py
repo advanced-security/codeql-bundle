@@ -1,4 +1,4 @@
-from codeql_bundle.helpers.codeql import (
+from .codeql import (
     CodeQL,
     CodeQLException,
     ResolvedCodeQLPack,
