@@ -1,7 +1,7 @@
 import click
 from pathlib import Path
-from helpers.codeql import CodeQLException
-from helpers.bundle import CustomBundle, BundleException
+from codeql_bundle.helpers.codeql import CodeQLException
+from codeql_bundle.helpers.bundle import CustomBundle, BundleException
 from typing import List
 import sys
 import logging
@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
     default="WARNING",
 )
 @click.argument("packs", nargs=-1)
-def cli(
+def main(
     bundle_path: Path,
     output: Path,
     workspace: Path,
@@ -110,4 +110,4 @@ def cli(
 
 
 if __name__ == "__main__":
-    cli()
+    main()

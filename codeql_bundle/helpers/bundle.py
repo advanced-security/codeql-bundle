@@ -1,4 +1,9 @@
-from helpers.codeql import CodeQL, CodeQLException, ResolvedCodeQLPack, CodeQLPackKind
+from codeql_bundle.helpers.codeql import (
+    CodeQL,
+    CodeQLException,
+    ResolvedCodeQLPack,
+    CodeQLPackKind,
+)
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import tarfile
