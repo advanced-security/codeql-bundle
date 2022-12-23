@@ -415,5 +415,5 @@ class CustomBundle(Bundle):
             output_path = output_path / "codeql-bundle.tar.gz"
 
         logging.debug(f"Bundling custom bundle to {output_path}.")
-        with tarfile.TarFile(output_path, mode="w") as bundle_archive:
+        with tarfile.open(output_path, mode="w:gz") as bundle_archive:
             bundle_archive.add(self.bundle_path, arcname="codeql")
