@@ -83,6 +83,14 @@ class CodeQL:
         else:
             raise CodeQLException(f"Failed to run {cp.args} command!")
 
+    def unpacked_location(self) -> Path:
+        cp = self._exec("version", "--format=json")
+        if cp.returncode == 0:
+            version_info = json.loads(cp.stdout)
+            return Path(version_info["unpackedLocation"])
+        else:
+            raise CodeQLException(f"Failed to run {cp.args} command!")
+
     def supports_qlx(self) -> bool:
         return self.version() >= Version("2.11.4")
 

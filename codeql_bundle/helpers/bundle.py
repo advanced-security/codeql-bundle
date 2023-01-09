@@ -23,11 +23,14 @@ class BundleException(Exception):
 
 class Bundle:
     def __init__(self, bundle_path: Path) -> None:
-        self.tmp_dir = None
+        self.tmp_dir = TemporaryDirectory()
         if bundle_path.is_dir():
-            self.bundle_path = bundle_path
+            self.bundle_path = Path(self.tmp_dir.name) / bundle_path.name
+            shutil.copytree(
+                bundle_path,
+                self.bundle_path,
+            )
         elif bundle_path.is_file() and bundle_path.name.endswith(".tar.gz"):
-            self.tmp_dir = TemporaryDirectory()
             logging.info(
                 f"Unpacking provided bundle {bundle_path} to {self.tmp_dir.name}."
             )
@@ -40,6 +43,8 @@ class Bundle:
         self.codeql = CodeQL(self.bundle_path / "codeql")
         try:
             logging.info(f"Validating the CodeQL CLI version part of the bundle.")
+            unpacked_location = self.codeql.unpacked_location()
+            logging.debug(f"Found CodeQL CLI in {str(unpacked_location)}.")
             version = self.codeql.version()
             logging.info(f"Found CodeQL CLI version {version}.")
         except CodeQLException:
