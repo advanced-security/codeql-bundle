@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
     ),
     default="WARNING",
 )
-@click.argument("packs", nargs=-1)
+@click.argument("packs", nargs=-1, required=True)
 def main(
     bundle_path: Path,
     output: Path,
