@@ -18,7 +18,7 @@ For more details on CodeQL customization packs see the section [CodeQL customiza
 The CodeQL bundle application can be installed using `pip` with the command:
 
 ```bash
-python 3.11 -m pip install https://github.com/rvermeulen/codeql-bundle/releases/download/v0.1.5/codeql_bundle-0.1.5-py3-none-any.whl
+python3.11 -m pip install https://github.com/rvermeulen/codeql-bundle/releases/download/v0.1.5/codeql_bundle-0.1.5-py3-none-any.whl
 ```
 
 ## Usage
