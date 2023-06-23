@@ -149,7 +149,7 @@ class CustomBundle(Bundle):
                     customization_pack_copy_dir = Path(self.tmp_dir.name)
                     if customization_pack.get_scope() != None:
                         customization_pack_copy_dir = (
-                            customization_pack_copy_dir / customization_pack.get_scope()
+                            customization_pack_copy_dir / cast(str, customization_pack.get_scope())
                         )
                     customization_pack_copy_dir = (
                         customization_pack_copy_dir
