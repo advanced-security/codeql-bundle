@@ -124,7 +124,7 @@ class CustomBundle(Bundle):
                 if pack.get_scope() != "codeql":
                     return False
                 # Here we assume that all our standard library, library packs have the scope 'codeql' and name '{lang}-all'
-                # with  '{lang}' being one the CodeQL supported languages.
+                # with  '{lang}' being one of the CodeQL supported languages.
                 return pack.get_pack_name().endswith("-all")
 
             resolved_dependencies = [
