@@ -89,9 +89,9 @@ class CustomBundle(Bundle):
                 )
 
             dep_pack = self.available_packs[dep_name]
-            if pack.dependencies[dep_name] > dep_pack.version:
+            if not pack.dependencies[dep_name].match(dep_pack.version):
                 raise BundleException(
-                    f"Package {pack.name} depends on version {pack.dependencies[dep_name]} of pack {dep_pack.name}, but the bundle contains {dep_pack.version}",
+                    f"Package {pack.name} depends on version specification {pack.dependencies[dep_name]} of pack {dep_pack.name}, but the bundle contains {dep_pack.version}",
                 )
         logging.info(f"The CodeQL pack {pack.name}'s dependencies are satisfied.")
 

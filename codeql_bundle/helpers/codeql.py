@@ -1,6 +1,6 @@
 import subprocess
 import json
-from semantic_version import Version
+from semantic_version import Version, NpmSpec
 from pathlib import Path
 from typing import Dict, Any, Iterable, Self, Optional, List
 import yaml
@@ -20,14 +20,22 @@ class CodeQLPack:
     library: bool = False
     name: str
     version: Version = Version("0.0.0")
-    dependencies: Dict[str, Version] = field(default_factory=dict)
+    dependencies: Dict[str, NpmSpec] = field(default_factory=dict)
     extractor: Optional[str] = None
 
     @classmethod
     def from_dict(cls, dict_: Dict[str, Any]) -> Self:
         fieldset = {f.name for f in fields(cls) if f.init}
 
-        filtered_dict = {k: v for k, v in dict_.items() if k in fieldset}
+        def _convert_value(k : str, v : Any) -> Any:
+            if k == "version":
+                return Version(v)
+            elif k == "dependencies":
+                return {k: NpmSpec(v) for k, v in v.items()}
+            else:
+                return v
+
+        filtered_dict = {k: _convert_value(k, v) for k, v in dict_.items() if k in fieldset}
         return cls(**filtered_dict)
 
     def get_scope(self) -> Optional[str]:
