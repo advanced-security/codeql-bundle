@@ -55,3 +55,9 @@ This example targets the C/C++ language, but you can use this for any supported 
 2. Turn the pack into a library pack `sed -i '' -e 's/library: false/library: true/' cpp-customizations/qlpack.yml`.
 3. Add a dependency on `codeql/cpp-all` with `codeql pack add --dir=cpp-customizations codeql/cpp-all`
 4. Implement the customizations module with `mkdir -p cpp-customizations/foo/cpp_customizations && echo "import cpp" > cpp-customizations/foo/cpp_customizations/Customizations.qll`
+
+## Limitations
+
+- The customization pack must directly rely on a CodeQL language pack.
+- The customization pack cannot have a dependency besides a CodeQL language pack, otherwise this will result in a cyclic dependency that we cannot resolve.
+- All packs must directly be specified. That is if a pack relies on another pack in the workspace, but that pack isn't specified as part of the `packs` argument, the pack will not be implicitly added and `codeql-bundle` will fail.
