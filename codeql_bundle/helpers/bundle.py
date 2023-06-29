@@ -1,25 +1,109 @@
 from .codeql import (
     CodeQL,
     CodeQLException,
-    ResolvedCodeQLPack,
-    CodeQLPackKind,
+    CodeQLPack
 )
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import tarfile
-from typing import List, cast
+from typing import List, cast, Callable
 from collections import defaultdict
 import shutil
 import yaml
 import dataclasses
 import logging
+from enum import Enum
+from dataclasses import dataclass
+from graphlib import TopologicalSorter
 
 logger = logging.getLogger(__name__)
 
+class CodeQLPackKind(Enum):
+    QUERY_PACK = 1
+    LIBRARY_PACK = 2
+    CUSTOMIZATION_PACK = 3
+
+@dataclass(kw_only=True, frozen=True, eq=True)
+class ResolvedCodeQLPack(CodeQLPack):
+    kind: CodeQLPackKind
+    dependencies: List["ResolvedCodeQLPack"] = dataclasses.field(default_factory=list)
+
+    def __hash__(self):
+        return CodeQLPack.__hash__(self)
+
+    def is_customizable(self) -> bool:
+        return self.get_customizations_module_path().exists()
+
+    def get_module_name(self) -> str:
+        return self.config.name.replace("-", "_").replace("/", ".")
+
+    def get_customizations_module_path(self) -> Path:
+        return self.path.parent / "Customizations.qll"
+
+    def get_lock_file_path(self) -> Path:
+        return self.path.parent / "codeql-pack.lock.yml"
+
+    def get_dependencies_path(self) -> Path:
+        return self.path.parent / ".codeql"
+
+    def get_cache_path(self) -> Path:
+        return self.path.parent / ".cache"
 
 class BundleException(Exception):
     pass
 
+class PackResolverException(Exception):
+    pass
+
+def build_pack_resolver(packs: List[CodeQLPack], already_resolved_packs: List[ResolvedCodeQLPack] = []) -> Callable[[CodeQLPack], ResolvedCodeQLPack]:
+    def builder()  -> Callable[[CodeQLPack], ResolvedCodeQLPack]:
+        resolved_packs: dict[CodeQLPack, ResolvedCodeQLPack] = {pack: pack for pack in already_resolved_packs}
+
+        candidates : dict[str, List[CodeQLPack]] = defaultdict(list)
+        for pack in packs + already_resolved_packs:
+            candidates[pack.config.name].append(pack)
+
+        def get_pack_kind(pack: CodeQLPack) -> CodeQLPackKind:
+            kind = CodeQLPackKind.QUERY_PACK
+            if pack.config.library:
+                if (
+                    pack.path.parent
+                    / pack.config.name.replace("-", "_")
+                    / "Customizations.qll"
+                ).exists():
+                    kind = CodeQLPackKind.CUSTOMIZATION_PACK
+                else:
+                    kind = CodeQLPackKind.LIBRARY_PACK
+            return kind
+
+        def resolve(pack: CodeQLPack) -> ResolvedCodeQLPack:
+            logger.debug(f"Resolving pack {pack.config.name}@{pack.config.version}")
+            if pack in resolved_packs:
+                logger.debug(f"Resolved pack {pack.config.name}@{pack.config.version}, already resolved.")
+                return resolved_packs[pack]
+            else:
+                resolved_deps: List[ResolvedCodeQLPack] = []
+                for dep_name, dep_version in pack.config.dependencies.items():
+                    logger.debug(f"Resolving dependency {dep_name}:{dep_version}.")
+                    resolved_dep = None
+                    for candidate_pack in candidates[dep_name]:
+                        logger.debug(f"Considering candidate pack {candidate_pack.config.name}@{candidate_pack.config.version}.")
+                        if dep_version.match(candidate_pack.config.version):
+                            logger.debug(f"Found candidate pack {candidate_pack.config.name}@{candidate_pack.config.version}.")
+                            resolved_dep = resolve(candidate_pack)
+
+                    if not resolved_dep:
+                        raise PackResolverException(f"Could not resolve dependency {dep_name} for pack {pack.config.name}!")
+                    resolved_deps.append(resolved_dep)
+
+
+                resolved_pack = ResolvedCodeQLPack(path=pack.path, config=pack.config, kind=get_pack_kind(pack), dependencies=resolved_deps)
+                resolved_packs[pack] = resolved_pack
+                return resolved_pack
+
+        return resolve
+
+    return builder()
 
 class Bundle:
     def __init__(self, bundle_path: Path) -> None:
@@ -47,8 +131,16 @@ class Bundle:
             logging.debug(f"Found CodeQL CLI in {str(unpacked_location)}.")
             version = self.codeql.version()
             logging.info(f"Found CodeQL CLI version {version}.")
+
+            logging.debug(f"Resolving packs in  {self.bundle_path}.")
+            packs: List[CodeQLPack] = self.codeql.pack_ls(self.bundle_path)
+            resolve = build_pack_resolver(packs)
+
+            self.bundle_packs: list[ResolvedCodeQLPack] = [resolve(pack) for pack in packs]
+
         except CodeQLException:
             raise BundleException("Cannot determine CodeQL version!")
+
 
     def __del__(self) -> None:
         if self.tmp_dir:
@@ -58,17 +150,28 @@ class Bundle:
             self.tmp_dir.cleanup()
 
     def getCodeQLPacks(self) -> List[ResolvedCodeQLPack]:
-        return self.codeql.pack_ls(self.bundle_path)
-
+        return self.bundle_packs
 
 class CustomBundle(Bundle):
     def __init__(self, bundle_path: Path, workspace_path: Path = Path.cwd()) -> None:
         Bundle.__init__(self, bundle_path)
 
-        self.bundle_packs = self.getCodeQLPacks()
-        self.workspace_packs = self.codeql.pack_ls(workspace_path)
-        self.available_packs = {
-            pack.name: pack for pack in self.bundle_packs + self.workspace_packs
+        packs: List[CodeQLPack] = self.codeql.pack_ls(workspace_path)
+        # Perform a sanity check on the packs in the workspace.
+        for pack in packs:
+            if not pack.config.get_scope():
+                raise BundleException(
+                    f"Pack '{pack.config.name}' does not have the required scope. This pack cannot be bundled!"
+                )
+
+        resolve = build_pack_resolver(packs, self.bundle_packs)
+        try:
+            self.workspace_packs: list[ResolvedCodeQLPack] = [resolve(pack) for pack in packs]
+        except PackResolverException as e:
+            raise BundleException(e)
+
+        self.available_packs: dict[str, ResolvedCodeQLPack] = {
+            pack.config.name: pack for pack in self.bundle_packs + self.workspace_packs
         }
         # A custom bundle will always need a temp directory for customization work.
         # If the bundle didn't create one (there was no need to unpack it), create it here.
@@ -78,342 +181,269 @@ class CustomBundle(Bundle):
                 f"Bundle doesn't have an associated temporary directory, created {self.tmp_dir.name} for building a custom bundle."
             )
 
-    def _validate_pack(self, pack: ResolvedCodeQLPack) -> None:
-        logging.info(
-            f"Validating if the CodeQL pack {pack.name} is compliant with the provided bundle."
-        )
-        for dep_name in pack.dependencies.keys():
-            if not dep_name in self.available_packs:
-                raise BundleException(
-                    f"Package {pack.name} depends on missing pack {dep_name}",
-                )
-
-            dep_pack = self.available_packs[dep_name]
-            if not pack.dependencies[dep_name].match(dep_pack.version):
-                raise BundleException(
-                    f"Package {pack.name} depends on version specification {pack.dependencies[dep_name]} of pack {dep_pack.name}, but the bundle contains {dep_pack.version}",
-                )
-        logging.info(f"The CodeQL pack {pack.name}'s dependencies are satisfied.")
+    def getCodeQLPacks(self) -> List[ResolvedCodeQLPack]:
+        return self.workspace_packs
 
     def add_packs(self, *packs: ResolvedCodeQLPack):
+        # Keep a map of standard library packs to their customization packs so we know which need to be modified.
+        std_lib_deps : dict[ResolvedCodeQLPack, List[ResolvedCodeQLPack]] = defaultdict(list)
+        pack_sorter : TopologicalSorter[ResolvedCodeQLPack] = TopologicalSorter()
         for pack in packs:
-            self._validate_pack(pack)
+            if pack.kind == CodeQLPackKind.CUSTOMIZATION_PACK:
+                pack_sorter.add(pack)
+                std_lib_deps[pack.dependencies[0]].append(pack)
+            else:
+                # If the query pack relies on a customization pack (e.g. for tests), add the std lib dependency of
+                # the customization pack to query pack because the customization pack will no longer have that
+                # dependency in the bundle.
+                if pack.kind == CodeQLPackKind.QUERY_PACK:
+                    for customization_pack in [dep for dep in pack.dependencies if dep.kind == CodeQLPackKind.CUSTOMIZATION_PACK]:
+                        std_lib_dep = customization_pack.dependencies[0]
+                        if not std_lib_dep in pack.dependencies:
+                            logger.debug(f"Adding stdlib dependency {std_lib_dep.config.name}@{str(std_lib_dep.config.version)} to {pack.config.name}@{str(pack.config.version)}")
+                            pack.dependencies.append(std_lib_dep)
+                pack_sorter.add(pack, *pack.dependencies)
 
-        kind_to_pack_map: dict[CodeQLPackKind, List[ResolvedCodeQLPack]] = defaultdict(
-            list
-        )
-        for pack in packs:
-            kind_to_pack_map[pack.kind].append(pack)
+        for pack in [p for p in self.workspace_packs if p.kind == CodeQLPackKind.CUSTOMIZATION_PACK]:
+            del pack.dependencies[0]
 
-        for library_pack in kind_to_pack_map[CodeQLPackKind.LIBRARY_PACK]:
-            logging.info(f"Bundling the library pack {library_pack.name}.")
+        def is_dependend_on(pack: ResolvedCodeQLPack, other: ResolvedCodeQLPack) -> bool:
+            return other in pack.dependencies or any(map(lambda p: is_dependend_on(p, other), pack.dependencies))
+        # Add the stdlib and its dependencies to properly sort the customization packs before the other packs.
+        for pack, deps in std_lib_deps.items():
+            pack_sorter.add(pack, *deps)
+            # Add the standard query packs that rely transitively on the stdlib.
+            for query_pack in [p for p in self.bundle_packs if p.kind == CodeQLPackKind.QUERY_PACK and is_dependend_on(p, pack)]:
+                pack_sorter.add(query_pack, pack)
+
+        def bundle_customization_pack(customization_pack: ResolvedCodeQLPack):
+            logging.info(f"Bundling the customization pack {customization_pack.config.name}.")
+            customization_pack_copy = copy_pack(customization_pack)
+
+            # Remove the target dependency to prevent a circular dependency in the target.
+            logging.debug(
+                f"Removing dependency on standard library to prevent circular dependency."
+            )
+            with customization_pack_copy.path.open("r") as fd:
+                qlpack_spec = yaml.safe_load(fd)
+
+            # Assume there is only one dependency and it is the standard library.
+            qlpack_spec["dependencies"] = {}
+            with customization_pack_copy.path.open("w") as fd:
+                yaml.dump(qlpack_spec, fd)
+
+            logging.debug(
+                f"Bundling the customization pack {customization_pack_copy.config.name} at {customization_pack_copy.path}"
+            )
+            self.codeql.pack_bundle(
+                customization_pack_copy, self.bundle_path / "qlpacks"
+            )
+
+        def copy_pack(pack: ResolvedCodeQLPack) -> ResolvedCodeQLPack:
+            pack_copy_dir = (
+            Path(self.tmp_dir.name)
+            / cast(str, pack.config.get_scope())
+            / pack.config.get_pack_name()
+            / str(pack.config.version)
+            )
+
+            logging.debug(
+                f"Copying {pack.path.parent} to {pack_copy_dir} for modification"
+            )
+            shutil.copytree(
+                pack.path.parent,
+                pack_copy_dir,
+            )
+            pack_copy_path = (
+                pack_copy_dir / pack.path.name
+            )
+            return dataclasses.replace(pack, path=pack_copy_path)
+
+        def add_customization_support(pack: ResolvedCodeQLPack):
+            if pack.is_customizable():
+                return
+
+            if not pack.config.get_scope() == "codeql" or not pack.config.library:
+                return
+
+            logging.debug(
+                    f"Standard library CodeQL pack {pack.config.name} does not have a 'Customizations' library, attempting to add one."
+                )
+            # Assume the CodeQL library pack has name `<language>-all`.
+            target_language = pack.config.get_pack_name().removesuffix("-all")
+            target_language_library_path = (
+                pack.path.parent / f"{target_language}.qll"
+            )
+            logging.debug(
+                f"Looking for standard library language module {target_language_library_path.name}"
+            )
+            if not target_language_library_path.exists():
+                raise BundleException(
+                    f"Unable to customize {pack.config.name}, because it doesn't have a 'Customizations' library and we cannot determine the language library."
+                )
+            logging.debug(
+                f"Found standard library language module {target_language_library_path.name}, adding import of 'Customizations' library."
+            )
+            with target_language_library_path.open("r") as fd:
+                target_language_library_lines = fd.readlines()
+            logging.debug(f"Looking for the first import statement.")
+
+            first_import_idx = None
+            for idx, line in enumerate(target_language_library_lines):
+                if line.startswith("import"):
+                    first_import_idx = idx
+                    break
+            if first_import_idx == None:
+                raise BundleException(
+                    f"Unable to customize {pack.config.name}, because we cannot determine the first import statement of {target_language_library_path.name}."
+                )
+            logging.debug(
+                "Found first import statement and prepending import statement importing 'Customizations'"
+            )
+            target_language_library_lines.insert(
+                first_import_idx, "import Customizations\n"
+            )
+            with target_language_library_path.open("w") as fd:
+                fd.writelines(target_language_library_lines)
+            logging.debug(
+                f"Writing modified language library to {target_language_library_path}"
+            )
+
+            target_customization_library_path = (
+                pack.path.parent / "Customizations.qll"
+            )
+            logging.debug(
+                f"Creating Customizations library with import of language {target_language}"
+            )
+            with target_customization_library_path.open("w") as fd:
+                fd.write(f"import {target_language}\n")
+
+        def bundle_stdlib_pack(pack: ResolvedCodeQLPack):
+            logging.info(f"Bundling the standard library pack {pack.config.name}.")
+
+            pack_copy = copy_pack(pack)
+
+            with pack_copy.path.open("r") as fd:
+                qlpack_spec = yaml.safe_load(fd)
+            if not "dependencies" in qlpack_spec:
+                qlpack_spec["dependencies"] = {}
+            for customization_pack in std_lib_deps[pack]:
+                logging.debug(
+                    f"Adding dependency {customization_pack.config.name} to {pack_copy.config.name}"
+                )
+                qlpack_spec["dependencies"][customization_pack.config.name] = str(
+                    customization_pack.config.version
+                )
+            with pack_copy.path.open("w") as fd:
+                yaml.dump(qlpack_spec, fd)
+
+            logging.debug(
+                f"Determining if standard library CodeQL library pack {pack_copy.config.name} is customizable."
+            )
+            if not pack_copy.is_customizable():
+                add_customization_support(pack_copy)
+
+            logging.debug(
+                f"Updating 'Customizations.qll' with imports of customization libraries."
+            )
+            with pack_copy.get_customizations_module_path().open("r") as fd:
+                contents = fd.readlines()
+            for customization_pack in std_lib_deps[pack]:
+                contents.append(
+                    f"import {customization_pack.get_module_name()}.Customizations"
+                )
+            with pack_copy.get_customizations_module_path().open("w") as fd:
+                fd.writelines(contents)
+
+            # Remove the original target library pack
+            logging.debug(
+                f"Removing the standard library at {pack.path} in preparation for replacement."
+            )
+            shutil.rmtree(pack.path.parent.parent)
+            # Bundle the new into the bundle.
+            logging.debug(
+                f"Bundling the standard library pack {pack_copy.config.name} at {pack_copy.path}"
+            )
+            self.codeql.pack_bundle(pack_copy, self.bundle_path / "qlpacks")
+
+        def bundle_library_pack(library_pack: ResolvedCodeQLPack):
+            logging.info(f"Bundling the library pack {library_pack.config.name}.")
             self.codeql.pack_bundle(
                 library_pack,
                 self.bundle_path / "qlpacks",
             )
 
-        # Collect customizations packs targeting the same library pack so we can
-        # process them in one go.
-        target_to_customization_pack_map: dict[
-            ResolvedCodeQLPack, List[ResolvedCodeQLPack]
-        ] = defaultdict(list)
+        def bundle_query_pack(pack: ResolvedCodeQLPack):
+            if pack.config.get_scope() == "codeql":
+                logging.info(f"Bundling the standard query pack {pack.config.name}.")
+                pack_copy = copy_pack(pack)
 
-        for customization_pack in kind_to_pack_map[CodeQLPackKind.CUSTOMIZATION_PACK]:
-
-            def is_candidate(pack: ResolvedCodeQLPack) -> bool:
-                if pack.get_scope() != "codeql":
-                    return False
-                # Here we assume that all our standard library, library packs have the scope 'codeql' and name '{lang}-all'
-                # with  '{lang}' being one of the CodeQL supported languages.
-                return pack.get_pack_name().endswith("-all")
-
-            resolved_dependencies = [
-                self.available_packs[dep_name]
-                for dep_name in customization_pack.dependencies.keys()
-            ]
-            candidates = list(filter(is_candidate, resolved_dependencies))
-            if len(candidates) != 1:
-                raise BundleException(
-                    f"Expected 1 standard library dependency for {customization_pack.name}, but found {len(candidates)}"
-                )
-
-            target_to_customization_pack_map[candidates[0]].append(customization_pack)
-
-            for target, customization_packs in target_to_customization_pack_map.items():
-                logging.info(
-                    f"Applying customization pack(s) to the standard library pack {target.name}"
-                )
-                # First we bundle each customization pack.
-                for customization_pack in customization_packs:
-                    logging.info(f"Applying {customization_pack.name} to {target.name}")
-                    customization_pack_copy_dir = Path(self.tmp_dir.name)
-                    if customization_pack.get_scope() != None:
-                        customization_pack_copy_dir = (
-                            customization_pack_copy_dir / cast(str, customization_pack.get_scope())
-                        )
-                    customization_pack_copy_dir = (
-                        customization_pack_copy_dir
-                        / customization_pack.get_pack_name()
-                        / str(customization_pack.version)
-                    )
-                    logging.debug(
-                        f"Copying { customization_pack.path.parent} to {customization_pack_copy_dir} for modifications"
-                    )
-                    shutil.copytree(
-                        customization_pack.path.parent,
-                        customization_pack_copy_dir,
-                    )
-
-                    customization_pack_copy_path = (
-                        customization_pack_copy_dir / customization_pack.path.name
-                    )
-
-                    # Remove the target dependency to prevent a circular dependency in the target.
-                    logging.debug(
-                        f"Removing dependency on {target.name} to prevent circular dependency."
-                    )
-                    with customization_pack_copy_path.open("r") as fd:
-                        qlpack_spec = yaml.safe_load(fd)
-
-                    del qlpack_spec["dependencies"][target.name]
-                    with customization_pack_copy_path.open("w") as fd:
-                        yaml.dump(qlpack_spec, fd)
-
-                    customization_pack_copy = dataclasses.replace(
-                        customization_pack, path=customization_pack_copy_path
-                    )
-                    logging.debug(
-                        f"Bundling the customization pack {customization_pack_copy.name} at {customization_pack_copy.path}"
-                    )
-                    self.codeql.pack_bundle(
-                        customization_pack_copy, self.bundle_path / "qlpacks"
-                    )
-
-                # Finally, we process the targeted standard library pack
-                # We copy the parent of the parent because the created query packs follow the directory structure
-                # scope/name/version/qlpack.yml and we want to avoid conflicts if multiple packs have the same version.
-                target_copy_dir = (
-                    Path(self.tmp_dir.name)
-                    / cast(Path, target.get_scope())
-                    / target.get_pack_name()
-                )
+                # Remove the lock file
                 logging.debug(
-                    f"Copying {target.path.parent.parent} to {target_copy_dir} for modification"
+                    f"Removing CodeQL pack lock file {pack_copy.get_lock_file_path()}"
                 )
-                shutil.copytree(
-                    target.path.parent.parent,
-                    target_copy_dir,
+                pack_copy.get_lock_file_path().unlink()
+                # Remove the included dependencies
+                logging.debug(
+                    f"Removing CodeQL query pack dependencies directory {pack_copy.get_dependencies_path()}"
                 )
-                target_copy_path = (
-                    target_copy_dir / str(target.version) / target.path.name
+                shutil.rmtree(pack_copy.get_dependencies_path())
+                # Remove the query cache, if it exists.
+                logging.debug(
+                    f"Removing CodeQL query pack cache directory {pack_copy.get_cache_path()}, if it exists."
                 )
-                target_copy = dataclasses.replace(target, path=target_copy_path)
+                shutil.rmtree(
+                    pack_copy.get_cache_path(),
+                    ignore_errors=True,
+                )
+                # Remove qlx files
+                if self.codeql.supports_qlx():
+                    logging.debug(f"Removing 'qlx' files in {pack_copy.path.parent}.")
+                    for qlx_path in pack_copy.path.parent.glob("**/*.qlx"):
+                        qlx_path.unlink()
 
-                with target_copy.path.open("r") as fd:
+                # Remove the original query pack
+                logging.debug(
+                    f"Removing the standard library query pack directory {pack.path.parent.parent} in preparation for recreation."
+                )
+                shutil.rmtree(pack.path.parent.parent)
+                logging.debug(
+                    f"Recreating {pack_copy.config.name} at {pack_copy.path} to {self.bundle_path / 'qlpacks'}"
+                )
+                # Recompile the query pack with the assumption that all its dependencies are now in the bundle.
+                self.codeql.pack_create(
+                    pack_copy,
+                    self.bundle_path / "qlpacks",
+                    self.bundle_path,
+                )
+            else:
+                logging.info(f"Bundling the query pack {pack.config.name}.")
+                pack_copy = copy_pack(pack)
+                # Rewrite the query pack dependencies
+                with pack_copy.path.open("r") as fd:
                     qlpack_spec = yaml.safe_load(fd)
-                if not "dependencies" in qlpack_spec:
-                    qlpack_spec["dependencies"] = {}
-                for customization_pack in customization_packs:
-                    logging.debug(
-                        f"Adding dependency {customization_pack.name} to {target.name}"
-                    )
-                    qlpack_spec["dependencies"][customization_pack.name] = str(
-                        customization_pack.version
-                    )
-                with target_copy.path.open("w") as fd:
+
+                # Assume there is only one dependency and it is the standard library.
+                qlpack_spec["dependencies"] = {pack.config.name: str(pack.config.version) for pack in pack_copy.dependencies}
+                logging.debug(f"Rewriting dependencies for {pack.config.name}.")
+                with pack_copy.path.open("w") as fd:
                     yaml.dump(qlpack_spec, fd)
 
-                logging.debug(
-                    f"Determining if standard library CodeQL library pack {target.name} is customizable."
+                self.codeql.pack_create(
+                    pack_copy,
+                    self.bundle_path / "qlpacks",
                 )
-                if not (target_copy.path.parent / "Customizations.qll").exists():
-                    logging.debug(
-                        f"Standard library CodeQL pack {target.name} does not have a 'Customizations' library, attempting to add one."
-                    )
-                    # Assume the CodeQL library pack has name `<language>-all`.
-                    target_language = target_copy.get_pack_name().removesuffix("-all")
-                    target_language_library_path = (
-                        target_copy.path.parent / f"{target_language}.qll"
-                    )
-                    logging.debug(
-                        f"Looking for standard library language module {target_language_library_path.name}"
-                    )
-                    if not target_language_library_path.exists():
-                        raise BundleException(
-                            f"Unable to customize {target.name}, because it doesn't have a 'Customizations' library and we cannot determine the language library."
-                        )
-                    logging.debug(
-                        f"Found standard library language module {target_language_library_path.name}, adding import of 'Customizations' library."
-                    )
-                    with target_language_library_path.open("r") as fd:
-                        target_language_library_lines = fd.readlines()
-                    logging.debug(f"Looking for the first import statement.")
 
-                    first_import_idx = None
-                    for idx, line in enumerate(target_language_library_lines):
-                        if line.startswith("import"):
-                            first_import_idx = idx
-                            break
-                    if first_import_idx == None:
-                        raise BundleException(
-                            f"Unable to customize {target.name}, because we cannot determine the first import statement of {target_language_library_path.name}."
-                        )
-                    logging.debug(
-                        "Found first import statement and prepending import statement importing 'Customizations'"
-                    )
-                    target_language_library_lines.insert(
-                        first_import_idx, "import Customizations\n"
-                    )
-                    with target_language_library_path.open("w") as fd:
-                        fd.writelines(target_language_library_lines)
-                    logging.debug(
-                        f"Writing modified language library to {target_language_library_path}"
-                    )
-
-                    target_customization_library_path = (
-                        target_copy.path.parent / "Customizations.qll"
-                    )
-                    logging.debug(
-                        f"Creating Customizations library with import of language {target_language}"
-                    )
-                    with target_customization_library_path.open("w") as fd:
-                        fd.write(f"import {target_language}\n")
-
-                logging.debug(
-                    f"Updating 'Customizations.qll' with imports of customization libraries."
-                )
-                with (target_copy.path.parent / "Customizations.qll").open("r") as fd:
-                    contents = fd.readlines()
-                for customization_pack in customization_packs:
-                    contents.append(
-                        f"import {customization_pack.name.replace('-', '_').replace('/', '.')}.Customizations"
-                    )
-                with (target_copy.path.parent / "Customizations.qll").open("w") as fd:
-                    fd.writelines(contents)
-
-                # Remove the original target library pack
-                logging.debug(
-                    f"Removing the standard library at {target.path} in preparation for replacement."
-                )
-                shutil.rmtree(target.path.parent.parent)
-                # Bundle the new into the bundle.
-                logging.debug(
-                    f"Bundling the standard library pack {target_copy.name} at {target_copy.path}"
-                )
-                self.codeql.pack_bundle(target_copy, self.bundle_path / "qlpacks")
-
-                logging.info(
-                    f"Looking for standard library query packs that need to be recreated."
-                )
-                # Recompile the query packs depending on the target library pack
-                for query_pack in filter(
-                    lambda p: p.kind == CodeQLPackKind.QUERY_PACK,
-                    self.available_packs.values(),
-                ):
-                    # Determine if the query pack depends on a library pack we customized.
-                    if target.name in query_pack.dependencies:
-                        logging.info(
-                            f"Found query pack {query_pack.name} that is depended on {target.name} and needs to be recreated."
-                        )
-                        query_pack_copy_dir = (
-                            Path(self.tmp_dir.name)
-                            / cast(Path, query_pack.get_scope())
-                            / query_pack.get_pack_name()
-                        )
-                        logging.debug(
-                            f"Copying {query_pack.path.parent.parent} to {query_pack_copy_dir} for modification."
-                        )
-                        shutil.copytree(
-                            query_pack.path.parent.parent, query_pack_copy_dir
-                        )
-
-                        query_pack_copy_path = (
-                            query_pack_copy_dir
-                            / str(query_pack.version)
-                            / query_pack.path.name
-                        )
-                        query_pack_copy = dataclasses.replace(
-                            query_pack, path=query_pack_copy_path
-                        )
-
-                        # A CodeQL bundle can contain query packs that rely on a suite-help pack that is not part of the bundle.
-                        # This poses a problem when recompiling a query pack assuming all dependencies are in the bundle.
-                        # We patch the version to use the version available in the bundle and rely on the compiler for correctness.
-                        if "codeql/suite-helpers" in query_pack_copy.dependencies:
-                            logging.debug(
-                                f"Patching dependency on 'codeql/suite-helpers' for {query_pack_copy.name}"
-                            )
-                            with query_pack_copy.path.open("r") as fd:
-                                qlpack_spec = yaml.safe_load(fd)
-
-                            qlpack_spec["dependencies"]["codeql/suite-helpers"] = "*"
-
-                            with query_pack_copy.path.open("w") as fd:
-                                yaml.dump(qlpack_spec, fd)
-
-                        # Remove the lock file
-                        logging.debug(
-                            f"Removing CodeQL pack lock file {query_pack_copy.path.parent / 'codeql-pack.lock.yml'}"
-                        )
-                        (query_pack_copy.path.parent / "codeql-pack.lock.yml").unlink()
-                        # Remove the included dependencies
-                        logging.debug(
-                            f"Removing CodeQL query pack dependencies directory {query_pack_copy.path.parent / '.codeql'}"
-                        )
-                        shutil.rmtree(query_pack_copy.path.parent / ".codeql")
-                        # Remove the query cache, if it exists.
-                        logging.debug(
-                            f"Removing CodeQL query pack cache directory {query_pack_copy.path.parent / '.cache'}, if it exists."
-                        )
-                        shutil.rmtree(
-                            query_pack_copy.path.parent / ".cache",
-                            ignore_errors=True,
-                        )
-                        # Remove qlx files
-                        if self.codeql.supports_qlx():
-                            logging.debug(f"Removing 'qlx' files in query pack.")
-                            for qlx_path in query_pack_copy.path.parent.glob(
-                                "**/*.qlx"
-                            ):
-                                qlx_path.unlink()
-                        # Remove the original query pack
-                        logging.debug(
-                            f"Removing the standard library query pack directory {query_pack.path.parent.parent} in preparation for recreation."
-                        )
-                        shutil.rmtree(query_pack.path.parent.parent)
-                        logging.debug(
-                            f"Recreating {query_pack_copy.name} at {query_pack_copy.path} to {self.bundle_path / 'qlpacks'}"
-                        )
-                        # Recompile the query pack with the assumption that all its dependencies are now in the bundle.
-                        self.codeql.pack_create(
-                            query_pack_copy,
-                            self.bundle_path / "qlpacks",
-                            self.bundle_path,
-                        )
-
-        logging.info(f"Looking for workspace query packs that need to be created.")
-        for query_pack in kind_to_pack_map[CodeQLPackKind.QUERY_PACK]:
-            # Copy the query pack so we can build it independently from the CodeQL workspace it is part of.
-            # This prevents cyclic dependency issues if  the workspace has customizations.
-            query_pack_copy_dir = Path(self.tmp_dir.name)
-            if query_pack.get_scope() != None:
-                query_pack_copy_dir = query_pack_copy_dir / query_pack.get_scope()
-            query_pack_copy_dir = (
-                query_pack_copy_dir
-                / query_pack.get_pack_name()
-                / str(query_pack.version)
-            )
-
-            shutil.copytree(
-                query_pack.path.parent,
-                query_pack_copy_dir,
-            )
-            query_pack_copy_path = query_pack_copy_dir / query_pack.path.name
-            query_pack_copy = dataclasses.replace(query_pack, path=query_pack_copy_path)
-            logging.info(f"Creating query pack {query_pack_copy.name}.")
-            self.codeql.pack_create(
-                query_pack_copy, self.bundle_path / "qlpacks", self.bundle_path
-            )
+        for pack in pack_sorter.static_order():
+            if pack.kind == CodeQLPackKind.CUSTOMIZATION_PACK:
+                bundle_customization_pack(pack)
+            elif pack.kind == CodeQLPackKind.LIBRARY_PACK:
+                if pack.config.get_scope() == "codeql":
+                    bundle_stdlib_pack(pack)
+                else:
+                    bundle_library_pack(pack)
+            elif pack.kind == CodeQLPackKind.QUERY_PACK:
+                bundle_query_pack(pack)
 
     def bundle(self, output_path: Path):
         if output_path.is_dir():
