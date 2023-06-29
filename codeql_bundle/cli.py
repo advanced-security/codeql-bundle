@@ -1,3 +1,12 @@
+# Add the parent directory to the path if this module is run directly (i.e. not imported)
+# This is necessary to support both the Poetry script invocation and the direct invocation.
+if not __package__ and __name__ == "__main__":
+    import sys
+    from pathlib import Path
+
+    sys.path.append(str(Path(__file__).parent.parent))
+    __package__ = Path(__file__).parent.name
+
 import click
 from pathlib import Path
 from codeql_bundle.helpers.codeql import CodeQLException
