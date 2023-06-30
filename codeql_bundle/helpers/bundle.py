@@ -207,13 +207,13 @@ class CustomBundle(Bundle):
         for pack in [p for p in self.workspace_packs if p.kind == CodeQLPackKind.CUSTOMIZATION_PACK]:
             del pack.dependencies[0]
 
-        def is_dependend_on(pack: ResolvedCodeQLPack, other: ResolvedCodeQLPack) -> bool:
-            return other in pack.dependencies or any(map(lambda p: is_dependend_on(p, other), pack.dependencies))
+        def is_dependent_on(pack: ResolvedCodeQLPack, other: ResolvedCodeQLPack) -> bool:
+            return other in pack.dependencies or any(map(lambda p: is_dependent_on(p, other), pack.dependencies))
         # Add the stdlib and its dependencies to properly sort the customization packs before the other packs.
         for pack, deps in std_lib_deps.items():
             pack_sorter.add(pack, *deps)
             # Add the standard query packs that rely transitively on the stdlib.
-            for query_pack in [p for p in self.bundle_packs if p.kind == CodeQLPackKind.QUERY_PACK and is_dependend_on(p, pack)]:
+            for query_pack in [p for p in self.bundle_packs if p.kind == CodeQLPackKind.QUERY_PACK and is_dependent_on(p, pack)]:
                 pack_sorter.add(query_pack, pack)
 
         def bundle_customization_pack(customization_pack: ResolvedCodeQLPack):
