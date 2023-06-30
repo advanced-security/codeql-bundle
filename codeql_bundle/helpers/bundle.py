@@ -185,6 +185,23 @@ class CustomBundle(Bundle):
         return self.workspace_packs
 
     def add_packs(self, *packs: ResolvedCodeQLPack):
+        """
+        Add packs and their workspace dependencies to the bundle. Standard library packs are customized if needed and standard query packs are recreated.
+
+        The approach taken is to first create a dependency graph from the provided packs and their dependencies.
+        During the dependency graph construction we track which standard library packs are customized by customization packs and add those and
+        the standard query packs depending on the customized standard library packs to the graph.
+
+        Once the dependency graph is constructed we use the graph to determine the order in which to process the packs.
+        For each pack kind we process the pack as necessary.
+        Library packs are bundled, query packs are (re)created, and customization packs are bundle and added as a dependency to the standard library pack they customize.
+        Last but not least, the `Customizations.qll` module is updated to import the customization packs whenever we re-bundle a standard library pack.
+
+        During the process a few hacks are applied. The customization packs that are bundled have their dependencies removed to prevent circular dependencies between the
+        customization packs and the standard library pack they customize.
+        Languages that do not have a `Customizations.qll` module are provided with one. This process will add the `Customizations.qll` module to the standard library pack
+        and import as the first module in the language module (eg., `cpp.qll` will import `Customizations.qll` as the first module).
+        """
         # Keep a map of standard library packs to their customization packs so we know which need to be modified.
         std_lib_deps : dict[ResolvedCodeQLPack, List[ResolvedCodeQLPack]] = defaultdict(list)
         pack_sorter : TopologicalSorter[ResolvedCodeQLPack] = TopologicalSorter()
