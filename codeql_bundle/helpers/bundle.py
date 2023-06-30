@@ -188,8 +188,14 @@ class CustomBundle(Bundle):
         # Keep a map of standard library packs to their customization packs so we know which need to be modified.
         std_lib_deps : dict[ResolvedCodeQLPack, List[ResolvedCodeQLPack]] = defaultdict(list)
         pack_sorter : TopologicalSorter[ResolvedCodeQLPack] = TopologicalSorter()
-        for pack in packs:
+
+        def add_to_graph(pack: ResolvedCodeQLPack, processed_packs: set[ResolvedCodeQLPack], std_lib_deps: dict[ResolvedCodeQLPack, List[ResolvedCodeQLPack]]):
+            # Only process workspace packs in this function
+            if not pack in self.workspace_packs:
+                logger.debug(f"Skipping adding pack {pack.config.name}@{str(pack.config.version)} to dependency graph")
+                return
             if pack.kind == CodeQLPackKind.CUSTOMIZATION_PACK:
+                logger.debug(f"Adding customization pack {pack.config.name}@{str(pack.config.version)} to dependency graph")
                 pack_sorter.add(pack)
                 std_lib_deps[pack.dependencies[0]].append(pack)
             else:
@@ -202,18 +208,27 @@ class CustomBundle(Bundle):
                         if not std_lib_dep in pack.dependencies:
                             logger.debug(f"Adding stdlib dependency {std_lib_dep.config.name}@{str(std_lib_dep.config.version)} to {pack.config.name}@{str(pack.config.version)}")
                             pack.dependencies.append(std_lib_dep)
+                logger.debug(f"Adding pack {pack.config.name}@{str(pack.config.version)} to dependency graph")
                 pack_sorter.add(pack, *pack.dependencies)
+                for dep in pack.dependencies:
+                    if dep not in processed_packs:
+                        add_to_graph(dep, processed_packs, std_lib_deps)
+            processed_packs.add(pack)
 
-        for pack in [p for p in self.workspace_packs if p.kind == CodeQLPackKind.CUSTOMIZATION_PACK]:
-            del pack.dependencies[0]
+        processed_packs : set[ResolvedCodeQLPack] = set()
+        for pack in packs:
+            if not pack in processed_packs:
+                add_to_graph(pack, processed_packs, std_lib_deps)
 
         def is_dependent_on(pack: ResolvedCodeQLPack, other: ResolvedCodeQLPack) -> bool:
             return other in pack.dependencies or any(map(lambda p: is_dependent_on(p, other), pack.dependencies))
         # Add the stdlib and its dependencies to properly sort the customization packs before the other packs.
         for pack, deps in std_lib_deps.items():
+            logger.debug(f"Adding standard library pack {pack.config.name}@{str(pack.config.version)} to dependency graph")
             pack_sorter.add(pack, *deps)
             # Add the standard query packs that rely transitively on the stdlib.
             for query_pack in [p for p in self.bundle_packs if p.kind == CodeQLPackKind.QUERY_PACK and is_dependent_on(p, pack)]:
+                logger.debug(f"Adding standard query pack {query_pack.config.name}@{str(query_pack.config.version)} to dependency graph")
                 pack_sorter.add(query_pack, pack)
 
         def bundle_customization_pack(customization_pack: ResolvedCodeQLPack):
