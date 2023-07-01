@@ -150,7 +150,7 @@ class CodeQL:
         if pack.config.library:
             raise CodeQLException(f"Cannot bundle non-query pack {pack.config.name}!")
 
-        args = ["create", "--format=json", f"--output={output_path}", "--threads=0"]
+        args = ["create", "--format=json", f"--output={output_path}", "--threads=0", "--no-default-compilation-cache"]
         if self.supports_qlx():
             args.append("--qlx")
         if len(additional_packs) > 0:
