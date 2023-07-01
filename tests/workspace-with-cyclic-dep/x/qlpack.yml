@@ -1,0 +1,7 @@
+---
+library: false
+warnOnImplicitThis: false
+name: cycle/x
+version: 0.0.1
+dependencies:
+  "cycle/y": "*"

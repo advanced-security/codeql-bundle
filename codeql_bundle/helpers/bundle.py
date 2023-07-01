@@ -77,30 +77,33 @@ def build_pack_resolver(packs: List[CodeQLPack], already_resolved_packs: List[Re
             return kind
 
         def resolve(pack: CodeQLPack) -> ResolvedCodeQLPack:
-            logger.debug(f"Resolving pack {pack.config.name}@{pack.config.version}")
-            if pack in resolved_packs:
-                logger.debug(f"Resolved pack {pack.config.name}@{pack.config.version}, already resolved.")
-                return resolved_packs[pack]
-            else:
-                resolved_deps: List[ResolvedCodeQLPack] = []
-                for dep_name, dep_version in pack.config.dependencies.items():
-                    logger.debug(f"Resolving dependency {dep_name}:{dep_version}.")
-                    resolved_dep = None
-                    for candidate_pack in candidates[dep_name]:
-                        logger.debug(f"Considering candidate pack {candidate_pack.config.name}@{candidate_pack.config.version}.")
-                        if dep_version.match(candidate_pack.config.version):
-                            logger.debug(f"Found candidate pack {candidate_pack.config.name}@{candidate_pack.config.version}.")
-                            resolved_dep = resolve(candidate_pack)
+            def inner(pack_to_be_resolved: CodeQLPack) -> ResolvedCodeQLPack:
+                logger.debug(f"Resolving pack {pack_to_be_resolved.config.name}@{pack_to_be_resolved.config.version}")
+                if pack_to_be_resolved in resolved_packs:
+                    logger.debug(f"Resolved pack {pack_to_be_resolved.config.name}@{pack_to_be_resolved.config.version}, already resolved.")
+                    return resolved_packs[pack_to_be_resolved]
+                else:
+                    resolved_deps: List[ResolvedCodeQLPack] = []
+                    for dep_name, dep_version in pack_to_be_resolved.config.dependencies.items():
+                        logger.debug(f"Resolving dependency {dep_name}:{dep_version}.")
+                        resolved_dep = None
+                        for candidate_pack in candidates[dep_name]:
+                            logger.debug(f"Considering candidate pack {candidate_pack.config.name}@{candidate_pack.config.version}.")
+                            if candidate_pack == pack:
+                                raise PackResolverException(f"Pack {pack.config.name}@{str(pack.config.version)} (transitively) depends on itself via {pack_to_be_resolved.config.name}@{str(pack_to_be_resolved.config.version)}!")
+                            if dep_version.match(candidate_pack.config.version):
+                                logger.debug(f"Found candidate pack {candidate_pack.config.name}@{candidate_pack.config.version}.")
+                                resolved_dep = inner(candidate_pack)
 
-                    if not resolved_dep:
-                        raise PackResolverException(f"Could not resolve dependency {dep_name} for pack {pack.config.name}!")
-                    resolved_deps.append(resolved_dep)
+                        if not resolved_dep:
+                            raise PackResolverException(f"Could not resolve dependency {dep_name} for pack {pack_to_be_resolved.config.name}!")
+                        resolved_deps.append(resolved_dep)
 
 
-                resolved_pack = ResolvedCodeQLPack(path=pack.path, config=pack.config, kind=get_pack_kind(pack), dependencies=resolved_deps)
-                resolved_packs[pack] = resolved_pack
-                return resolved_pack
-
+                    resolved_pack = ResolvedCodeQLPack(path=pack_to_be_resolved.path, config=pack_to_be_resolved.config, kind=get_pack_kind(pack_to_be_resolved), dependencies=resolved_deps)
+                    resolved_packs[pack_to_be_resolved] = resolved_pack
+                    return resolved_pack
+            return inner(pack)
         return resolve
 
     return builder()
