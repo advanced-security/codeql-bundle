@@ -1,3 +1,12 @@
+# Add the parent directory to the path if this module is run directly (i.e. not imported)
+# This is necessary to support both the Poetry script invocation and the direct invocation.
+if not __package__ and __name__ == "__main__":
+    import sys
+    from pathlib import Path
+
+    sys.path.append(str(Path(__file__).parent.parent))
+    __package__ = Path(__file__).parent.name
+
 import click
 from pathlib import Path
 from codeql_bundle.helpers.codeql import CodeQLException
@@ -7,7 +16,6 @@ import sys
 import logging
 
 logger = logging.getLogger(__name__)
-
 
 @click.command()
 @click.option(
@@ -71,24 +79,24 @@ def main(
     try:
         bundle = CustomBundle(bundle_path, workspace)
         logger.info(f"Looking for CodeQL packs in workspace {workspace}")
-        packs_in_workspace = bundle.codeql.pack_ls(workspace)
+        packs_in_workspace = bundle.getCodeQLPacks()
         logger.info(
-            f"Found the CodeQL packs: {','.join(map(lambda p: p.name, packs_in_workspace))}"
+            f"Found the CodeQL packs: {','.join(map(lambda p: p.config.name, packs_in_workspace))}"
         )
 
         if len(packs) > 0:
             selected_packs = [
                 available_pack
                 for available_pack in packs_in_workspace
-                if available_pack.name in packs
+                if available_pack.config.name in packs
             ]
         else:
             selected_packs = packs_in_workspace
 
         logger.info(
-            f"Considering the following CodeQL packs for inclusion in the custom bundle: {','.join(map(lambda p: p.name, selected_packs))}"
+            f"Considering the following CodeQL packs for inclusion in the custom bundle: {','.join(map(lambda p: p.config.name, selected_packs))}"
         )
-        missing_packs = set(packs) - {pack.name for pack in selected_packs}
+        missing_packs = set(packs) - {pack.config.name for pack in selected_packs}
         if len(missing_packs) > 0:
             logger.fatal(
                 f"The provided CodeQL workspace doesn't contain the provided packs '{','.join(missing_packs)}'",
@@ -96,7 +104,7 @@ def main(
             sys.exit(1)
 
         logger.info(
-            f"Adding the packs {','.join(map(lambda p: p.name, selected_packs))} to the custom bundle."
+            f"Adding the packs {','.join(map(lambda p: p.config.name, selected_packs))} and its workspace dependencies to the custom bundle."
         )
         bundle.add_packs(*selected_packs)
         logger.info(f"Bundling custom bundle at {output}")

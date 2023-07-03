@@ -1,0 +1,7 @@
+library: true
+name: foo/cpp-customizations-tests
+version: 0.0.1
+dependencies:
+  "foo/cpp-customizations": "*"
+  "test/a": "*"
+extractor: cpp

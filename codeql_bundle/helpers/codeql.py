@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Dict, Any, Iterable, Self, Optional, List
 import yaml
 from dataclasses import dataclass, fields, field
-from enum import Enum
 import logging
 
 logger = logging.getLogger(__name__)
@@ -16,7 +15,7 @@ class CodeQLException(Exception):
 
 
 @dataclass(kw_only=True, frozen=True, eq=True)
-class CodeQLPack:
+class CodeQLPackConfig:
     library: bool = False
     name: str
     version: Version = Version("0.0.0")
@@ -53,25 +52,18 @@ class CodeQLPack:
     def __hash__(self):
         return hash(f"{self.name}@{str(self.version)}")
 
-
-class CodeQLPackKind(Enum):
-    QUERY_PACK = 1
-    LIBRARY_PACK = 2
-    CUSTOMIZATION_PACK = 3
-
-
 @dataclass(kw_only=True, frozen=True, eq=True)
-class ResolvedCodeQLPack(CodeQLPack):
+class CodeQLPack:
     path: Path
-    kind: CodeQLPackKind
+    config: CodeQLPackConfig
 
-    def __hash__(self):
-        return CodeQLPack.__hash__(self)
-
+    def __hash__(self) -> int:
+        return hash(f"{self.path}")
 
 class CodeQL:
     def __init__(self, codeql_path: Path):
         self.codeql_path = codeql_path
+        self._version = None
 
     def _exec(self, command: str, *args: str) -> subprocess.CompletedProcess[str]:
         logger.debug(
@@ -80,16 +72,20 @@ class CodeQL:
         return subprocess.run(
             [f"{self.codeql_path}", command] + [arg for arg in args],
             capture_output=True,
-            text=True,
+            text=True
         )
 
     def version(self) -> Version:
-        cp = self._exec("version", "--format=json")
-        if cp.returncode == 0:
-            version_info = json.loads(cp.stdout)
-            return Version(version_info["version"])
+        if self._version != None:
+            return self._version
         else:
-            raise CodeQLException(f"Failed to run {cp.args} command!")
+            cp = self._exec("version", "--format=json")
+            if cp.returncode == 0:
+                version_info = json.loads(cp.stdout)
+                self._version = Version(version_info["version"])
+                return self._version
+            else:
+                raise CodeQLException(f"Failed to run {cp.args} command!")
 
     def unpacked_location(self) -> Path:
         cp = self._exec("version", "--format=json")
@@ -102,44 +98,36 @@ class CodeQL:
     def supports_qlx(self) -> bool:
         return self.version() >= Version("2.11.4")
 
-    def pack_ls(self, workspace: Path = Path.cwd()) -> List[ResolvedCodeQLPack]:
+    def pack_ls(self, workspace: Path = Path.cwd()) -> List[CodeQLPack]:
         cp = self._exec("pack", "ls", "--format=json", str(workspace))
         if cp.returncode == 0:
             packs: Iterable[Path] = map(Path, json.loads(cp.stdout)["packs"].keys())
 
-            def load(qlpack: Path) -> ResolvedCodeQLPack:
-                with qlpack.open("r") as qlpack_file:
-                    logger.debug(f"Resolving CodeQL pack at {qlpack}.")
-                    qlpack_spec = yaml.safe_load(qlpack_file)
-                    qlpack_spec["path"] = qlpack
-                    if not "library" in qlpack_spec or not qlpack_spec["library"]:
-                        qlpack_spec["kind"] = CodeQLPackKind.QUERY_PACK
-                    else:
-                        if (
-                            qlpack_spec["path"].parent
-                            / qlpack_spec["name"].replace("-", "_")
-                            / "Customizations.qll"
-                        ).exists():
-                            qlpack_spec["kind"] = CodeQLPackKind.CUSTOMIZATION_PACK
-                        else:
-                            qlpack_spec["kind"] = CodeQLPackKind.LIBRARY_PACK
-                    resolved_pack = ResolvedCodeQLPack.from_dict(qlpack_spec)
+            def load(qlpack_yml_path: Path) -> CodeQLPack:
+                with qlpack_yml_path.open("r") as qlpack_yml_file:
+                    logger.debug(f"Loading CodeQL pack configuration at {qlpack_yml_path}.")
+                    qlpack_yml_as_dict: Dict[str, Any] = yaml.safe_load(qlpack_yml_file)
+                    qlpack_config = CodeQLPackConfig.from_dict(qlpack_yml_as_dict)
+                    qlpack = CodeQLPack(path=qlpack_yml_path, config=qlpack_config)
                     logger.debug(
-                        f"Resolved {resolved_pack.name} with version {str(resolved_pack.version)} at {resolved_pack.path} with kind {resolved_pack.kind.name}"
+                        f"Loaded {qlpack.config.name} with version {str(qlpack.config.version)} at {qlpack.path}."
                     )
-                    return resolved_pack
+                    return qlpack
 
-            logger.debug(f"Resolving CodeQL packs for workspace {workspace}")
+            logger.debug(f"Listing CodeQL packs for workspace {workspace}")
             return list(map(load, packs))
         else:
             raise CodeQLException(f"Failed to run {cp.args} command! {cp.stderr}")
 
     def pack_bundle(
         self,
-        pack: ResolvedCodeQLPack,
+        pack: CodeQLPack,
         output_path: Path,
         *additional_packs: Path,
     ):
+        if not pack.config.library:
+            raise CodeQLException(f"Cannot bundle non-library pack {pack.config.name}!")
+
         args = ["bundle", "--format=json", f"--pack-path={output_path}"]
         if len(additional_packs) > 0:
             args.append(f"--additional-packs={':'.join(map(str,additional_packs))}")
@@ -155,11 +143,14 @@ class CodeQL:
 
     def pack_create(
         self,
-        pack: ResolvedCodeQLPack,
+        pack: CodeQLPack,
         output_path: Path,
         *additional_packs: Path,
     ):
-        args = ["create", "--format=json", f"--output={output_path}", "--threads=0"]
+        if pack.config.library:
+            raise CodeQLException(f"Cannot bundle non-query pack {pack.config.name}!")
+
+        args = ["create", "--format=json", f"--output={output_path}", "--threads=0", "--no-default-compilation-cache"]
         if self.supports_qlx():
             args.append("--qlx")
         if len(additional_packs) > 0:

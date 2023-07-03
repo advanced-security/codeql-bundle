@@ -1,0 +1,7 @@
+---
+library: true
+warnOnImplicitThis: false
+name: test/a
+version: 0.0.1
+dependencies:
+  test/aa: "*"

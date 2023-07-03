@@ -1,0 +1,7 @@
+---
+library: true
+warnOnImplicitThis: false
+name: test/aa
+version: 0.0.1
+dependencies:
+  "codeql/cpp-all": "0.7.3"
