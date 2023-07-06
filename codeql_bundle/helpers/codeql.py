@@ -164,3 +164,10 @@ class CodeQL:
 
         if cp.returncode != 0:
             raise CodeQLException(f"Failed to run {cp.args} command! {cp.stderr}")
+        
+    def resolve_languages(self) -> set[str]:
+        cp = self._exec("resolve", "languages", "--format=json")
+        if cp.returncode == 0:
+            return set(json.loads(cp.stdout).keys())
+        else:
+            raise CodeQLException(f"Failed to run {cp.args} command! {cp.stderr}")
