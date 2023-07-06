@@ -277,6 +277,7 @@ class CustomBundle(Bundle):
         def copy_pack(pack: ResolvedCodeQLPack) -> ResolvedCodeQLPack:
             pack_copy_dir = (
             Path(self.tmp_dir.name)
+            / "temp" # Add a temp path segment because the standard library packs have scope 'codeql' that collides with the 'codeql' directory in the bundle that is extracted to the temporary directory.
             / cast(str, pack.config.get_scope())
             / pack.config.get_pack_name()
             / str(pack.config.version)
