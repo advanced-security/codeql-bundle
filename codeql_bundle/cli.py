@@ -10,7 +10,7 @@ if not __package__ and __name__ == "__main__":
 import click
 from pathlib import Path
 from codeql_bundle.helpers.codeql import CodeQLException
-from codeql_bundle.helpers.bundle import CustomBundle, BundleException
+from codeql_bundle.helpers.bundle import CustomBundle, BundleException, BundlePlatform
 from typing import List
 import sys
 import logging
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
     "-o",
     "--output",
     required=True,
-    help="Path to store the custom CodeQL bundle. Can be a directory or a non-existing archive ending with the extension '.tar.gz'",
+    help="Path to store the custom CodeQL bundle. Can be a directory or a non-existing archive ending with the extension '.tar.gz' if there is only a single bundle",
     type=click.Path(path_type=Path),
 )
 @click.option(
@@ -49,12 +49,14 @@ logger = logging.getLogger(__name__)
     ),
     default="WARNING",
 )
+@click.option("-p", "--platform", multiple=True, type=click.Choice(["linux64", "osx64", "win64"], case_sensitive=False), help="Target platform for the bundle")
 @click.argument("packs", nargs=-1, required=True)
 def main(
     bundle_path: Path,
     output: Path,
     workspace: Path,
     loglevel: str,
+    platform: List[str],
     packs: List[str],
 ) -> None:
 
@@ -73,15 +75,27 @@ def main(
         workspace = workspace.parent
 
     logger.info(
-        f"Creating custom bundle of {bundle_path} using CodeQL packs in workspace {workspace}"
+        f"Creating custom bundle of {bundle_path} using CodeQL pack(s) in workspace {workspace}"
     )
 
     try:
         bundle = CustomBundle(bundle_path, workspace)
+
+        unsupported_platforms = list(filter(lambda p: not bundle.supports_platform(BundlePlatform.from_string(p)), platform))
+        if len(unsupported_platforms) > 0:
+            logger.fatal(
+                f"The provided bundle supports the platform(s) {', '.join(map(str, bundle.platforms))}, but doesn't support the following platform(s): {', '.join(unsupported_platforms)}"
+            )
+            sys.exit(1)
+
         logger.info(f"Looking for CodeQL packs in workspace {workspace}")
-        packs_in_workspace = bundle.getCodeQLPacks()
+        packs_in_workspace = bundle.get_workspace_packs()
         logger.info(
-            f"Found the CodeQL packs: {','.join(map(lambda p: p.config.name, packs_in_workspace))}"
+            f"Found the CodeQL pack(s): {','.join(map(lambda p: p.config.name, packs_in_workspace))}"
+        )
+
+        logger.info(
+            f"Considering the following CodeQL pack(s) for inclusion in the custom bundle: {','.join(packs)}"
         )
 
         if len(packs) > 0:
@@ -93,23 +107,22 @@ def main(
         else:
             selected_packs = packs_in_workspace
 
-        logger.info(
-            f"Considering the following CodeQL packs for inclusion in the custom bundle: {','.join(map(lambda p: p.config.name, selected_packs))}"
-        )
+        
         missing_packs = set(packs) - {pack.config.name for pack in selected_packs}
         if len(missing_packs) > 0:
             logger.fatal(
-                f"The provided CodeQL workspace doesn't contain the provided packs '{','.join(missing_packs)}'",
+                f"The provided CodeQL workspace doesn't contain the provided pack(s) '{','.join(missing_packs)}'",
             )
             sys.exit(1)
 
         logger.info(
-            f"Adding the packs {','.join(map(lambda p: p.config.name, selected_packs))} and its workspace dependencies to the custom bundle."
+            f"Adding the pack(s) {','.join(map(lambda p: p.config.name, selected_packs))} and its workspace dependencies to the custom bundle."
         )
         bundle.add_packs(*selected_packs)
-        logger.info(f"Bundling custom bundle at {output}")
-        bundle.bundle(output)
-        logger.info(f"Completed building of custom bundle.")
+        logger.info(f"Bundling custom bundle(s) at {output}")
+        platforms = set(map(BundlePlatform.from_string, platform))
+        bundle.bundle(output, platforms)
+        logger.info(f"Completed building of custom bundle(s).")
     except CodeQLException as e:
         logger.fatal(f"Failed executing CodeQL command with reason: '{e}'")
         sys.exit(1)

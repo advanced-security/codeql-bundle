@@ -6,18 +6,21 @@ from .codeql import (
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import tarfile
-from typing import List, cast, Callable
+from typing import List, cast, Callable, Optional
 from collections import defaultdict
 import shutil
 import yaml
 import dataclasses
 import logging
-from enum import Enum
+from enum import Enum, verify, UNIQUE
 from dataclasses import dataclass
 from graphlib import TopologicalSorter
+import platform
+import concurrent.futures
 
 logger = logging.getLogger(__name__)
 
+@verify(UNIQUE)
 class CodeQLPackKind(Enum):
     QUERY_PACK = 1
     LIBRARY_PACK = 2
@@ -48,6 +51,9 @@ class ResolvedCodeQLPack(CodeQLPack):
 
     def get_cache_path(self) -> Path:
         return self.path.parent / ".cache"
+
+    def is_stdlib_module(self) -> bool:
+        return self.config.get_scope() == "codeql"
 
 class BundleException(Exception):
     pass
@@ -96,7 +102,7 @@ def build_pack_resolver(packs: List[CodeQLPack], already_resolved_packs: List[Re
                                 resolved_dep = inner(candidate_pack)
 
                         if not resolved_dep:
-                            raise PackResolverException(f"Could not resolve dependency {dep_name} for pack {pack_to_be_resolved.config.name}!")
+                            raise PackResolverException(f"Could not resolve dependency {dep_name}@{dep_version} for pack {pack_to_be_resolved.config.name}@{str(pack_to_be_resolved.config.version)}!")
                         resolved_deps.append(resolved_dep)
 
 
@@ -107,6 +113,33 @@ def build_pack_resolver(packs: List[CodeQLPack], already_resolved_packs: List[Re
         return resolve
 
     return builder()
+
+@verify(UNIQUE)
+class BundlePlatform(Enum):
+    LINUX = 1
+    WINDOWS = 2
+    OSX = 3
+
+    @staticmethod
+    def from_string(platform: str) -> "BundlePlatform":
+        if platform.lower() == "linux" or platform.lower() == "linux64":
+            return BundlePlatform.LINUX
+        elif platform.lower() == "windows" or platform.lower() == "win64":
+            return BundlePlatform.WINDOWS
+        elif platform.lower() == "osx" or platform.lower() == "osx64":
+            return BundlePlatform.OSX
+        else:
+            raise BundleException(f"Invalid platform {platform}")
+
+    def __str__(self):
+        if self == BundlePlatform.LINUX:
+            return "linux64"
+        elif self == BundlePlatform.WINDOWS:
+            return "win64"
+        elif self == BundlePlatform.OSX:
+            return "osx64"
+        else:
+            raise BundleException(f"Invalid platform {self}")
 
 class Bundle:
     def __init__(self, bundle_path: Path) -> None:
@@ -127,6 +160,36 @@ class Bundle:
         else:
             raise BundleException("Invalid CodeQL bundle path")
 
+        def supports_linux() -> set[BundlePlatform]:
+            if (self.bundle_path / "cpp" / "tools" / "linux64").exists():
+                return {BundlePlatform.LINUX}
+            else:
+                return set()
+
+        def supports_macos() -> set[BundlePlatform]:
+            if (self.bundle_path / "cpp" / "tools" / "osx64").exists():
+                return {BundlePlatform.OSX}
+            else:
+                return set()
+
+        def supports_windows() -> set[BundlePlatform]:
+            if (self.bundle_path / "cpp" / "tools" / "win64").exists():
+                return {BundlePlatform.WINDOWS}
+            else:
+                return set()
+
+        self.platforms: set[BundlePlatform] = supports_linux() | supports_macos() | supports_windows()
+
+        current_system = platform.system()
+        if not current_system in ["Linux", "Darwin", "Windows"]:
+            raise BundleException(f"Unsupported system: {current_system}")
+        if current_system == "Linux" and BundlePlatform.LINUX not in self.platforms:
+            raise BundleException("Bundle doesn't support Linux!")
+        elif current_system == "Darwin" and BundlePlatform.OSX not in self.platforms:
+            raise BundleException("Bundle doesn't support OSX!")
+        elif current_system == "Windows" and BundlePlatform.WINDOWS not in self.platforms:
+            raise BundleException("Bundle doesn't support Windows!")
+
         self.codeql = CodeQL(self.bundle_path / "codeql")
         try:
             logging.info(f"Validating the CodeQL CLI version part of the bundle.")
@@ -141,9 +204,10 @@ class Bundle:
 
             self.bundle_packs: list[ResolvedCodeQLPack] = [resolve(pack) for pack in packs]
 
+            self.languages = self.codeql.resolve_languages()
+
         except CodeQLException:
             raise BundleException("Cannot determine CodeQL version!")
-
 
     def __del__(self) -> None:
         if self.tmp_dir:
@@ -152,8 +216,11 @@ class Bundle:
             )
             self.tmp_dir.cleanup()
 
-    def getCodeQLPacks(self) -> List[ResolvedCodeQLPack]:
+    def get_bundle_packs(self) -> List[ResolvedCodeQLPack]:
         return self.bundle_packs
+
+    def supports_platform(self, platform: BundlePlatform) -> bool:
+        return platform in self.platforms
 
 class CustomBundle(Bundle):
     def __init__(self, bundle_path: Path, workspace_path: Path = Path.cwd()) -> None:
@@ -184,7 +251,7 @@ class CustomBundle(Bundle):
                 f"Bundle doesn't have an associated temporary directory, created {self.tmp_dir.name} for building a custom bundle."
             )
 
-    def getCodeQLPacks(self) -> List[ResolvedCodeQLPack]:
+    def get_workspace_packs(self) -> List[ResolvedCodeQLPack]:
         return self.workspace_packs
 
     def add_packs(self, *packs: ResolvedCodeQLPack):
@@ -229,7 +296,7 @@ class CustomBundle(Bundle):
                             logger.debug(f"Adding stdlib dependency {std_lib_dep.config.name}@{str(std_lib_dep.config.version)} to {pack.config.name}@{str(pack.config.version)}")
                             pack.dependencies.append(std_lib_dep)
                 logger.debug(f"Adding pack {pack.config.name}@{str(pack.config.version)} to dependency graph")
-                pack_sorter.add(pack, *pack.dependencies)
+                pack_sorter.add(pack)
                 for dep in pack.dependencies:
                     if dep not in processed_packs:
                         add_to_graph(dep, processed_packs, std_lib_deps)
@@ -277,6 +344,7 @@ class CustomBundle(Bundle):
         def copy_pack(pack: ResolvedCodeQLPack) -> ResolvedCodeQLPack:
             pack_copy_dir = (
             Path(self.tmp_dir.name)
+            / "temp" # Add a temp path segment because the standard library packs have scope 'codeql' that collides with the 'codeql' directory in the bundle that is extracted to the temporary directory.
             / cast(str, pack.config.get_scope())
             / pack.config.get_pack_name()
             / str(pack.config.version)
@@ -480,10 +548,93 @@ class CustomBundle(Bundle):
             elif pack.kind == CodeQLPackKind.QUERY_PACK:
                 bundle_query_pack(pack)
 
-    def bundle(self, output_path: Path):
-        if output_path.is_dir():
-            output_path = output_path / "codeql-bundle.tar.gz"
+    def bundle(self, output_path: Path, platforms: set[BundlePlatform] = set()):
+        if len(platforms) == 0:
+            if output_path.is_dir():
+                output_path = output_path / "codeql-bundle.tar.gz"
 
-        logging.debug(f"Bundling custom bundle to {output_path}.")
-        with tarfile.open(output_path, mode="w:gz") as bundle_archive:
-            bundle_archive.add(self.bundle_path, arcname="codeql")
+            logging.debug(f"Bundling custom bundle to {output_path}.")
+            with tarfile.open(output_path, mode="w:gz") as bundle_archive:
+                bundle_archive.add(self.bundle_path, arcname="codeql")
+        else:
+            if not output_path.is_dir():
+                raise BundleException(
+                    f"Output path {output_path} must be a directory when bundling for multiple platforms."
+                )
+
+            unsupported_platforms = platforms - self.platforms
+            if len(unsupported_platforms) > 0:
+                raise BundleException(
+                    f"Unsupported platform(s) {', '.join(map(str,unsupported_platforms))} specified. Use the platform agnostic bundle to bundle for different platforms."
+                )
+
+            def create_bundle_for_platform(bundle_output_path:Path, platform: BundlePlatform) -> None:
+                """Create a bundle for a single platform."""
+                def filter_for_platform(platform: BundlePlatform) -> Callable[[tarfile.TarInfo], Optional[tarfile.TarInfo]]:
+                    """Create a filter function that will only include files for the specified platform."""
+                    relative_tools_paths = [Path(lang) / "tools" for lang in self.languages] + [Path("tools")]
+
+                    def get_nonplatform_tool_paths(platform: BundlePlatform) -> List[Path]:
+                        """Get a list of paths to tools that are not for the specified platform relative to the root of a bundle."""
+                        specialize_path : Optional[Callable[[Path], List[Path]]] = None
+                        linux64_subpaths = [Path("linux64"), Path("linux")]
+                        osx64_subpaths = [Path("osx64"), Path("macos")]
+                        win64_subpaths = [Path("win64"), Path("windows")]
+                        if platform == BundlePlatform.LINUX:
+                            specialize_path = lambda p: [p / subpath for subpath in osx64_subpaths + win64_subpaths]
+                        elif platform == BundlePlatform.WINDOWS:
+                            specialize_path = lambda p: [p / subpath for subpath in osx64_subpaths + linux64_subpaths]
+                        elif platform == BundlePlatform.OSX:
+                            specialize_path = lambda p: [p / subpath for subpath in linux64_subpaths + win64_subpaths]
+                        else:
+                            raise BundleException(f"Unsupported platform {platform}.")
+
+                        return [candidate for candidates in map(specialize_path, relative_tools_paths) for candidate in candidates]
+
+                    def filter(tarinfo: tarfile.TarInfo) -> Optional[tarfile.TarInfo]:
+                        tarfile_path = Path(tarinfo.name)
+
+                        exclusion_paths = get_nonplatform_tool_paths(platform)
+                        
+                        # Manual exclusions based on diffing the contents of the platform specific bundles and the generated platform specific bundles.
+                        if platform != BundlePlatform.WINDOWS:
+                            exclusion_paths.append(Path("codeql.exe"))
+                        else:
+                            exclusion_paths.append(Path("swift/qltest"))
+                            exclusion_paths.append(Path("swift/resource-dir"))
+
+                        if platform == BundlePlatform.LINUX:
+                            exclusion_paths.append(Path("swift/qltest/osx64"))
+                            exclusion_paths.append(Path("swift/resource-dir/osx64"))
+
+                        if platform == BundlePlatform.OSX:
+                            exclusion_paths.append(Path("swift/qltest/linux64"))
+                            exclusion_paths.append(Path("swift/resource-dir/linux64"))
+                        
+                        
+                        tarfile_path_root = Path(tarfile_path.parts[0])
+                        exclusion_paths = [tarfile_path_root / path for path in exclusion_paths]
+
+                        if any(tarfile_path.is_relative_to(path) for path in exclusion_paths):
+                            return None
+
+                        return tarinfo
+
+                    return filter
+                logging.debug(f"Bundling custom bundle for {platform} to {bundle_output_path}.")
+                with tarfile.open(bundle_output_path, mode="w:gz") as bundle_archive:
+                    bundle_archive.add(
+                        self.bundle_path, arcname="codeql", filter=filter_for_platform(platform)
+                    )
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(platforms)) as executor:
+                future_to_platform = {executor.submit(create_bundle_for_platform, output_path / f"codeql-bundle-{platform}.tar.gz", platform): platform for platform in platforms}
+                for future in concurrent.futures.as_completed(future_to_platform):
+                    platform = future_to_platform[future]
+                    try:
+                        future.result()
+                    except Exception as exc:
+                        raise BundleException(f"Failed to create bundle for platform {platform} with exception: {exc}.")
+
+
+
