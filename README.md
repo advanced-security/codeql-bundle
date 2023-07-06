@@ -18,7 +18,7 @@ For more details on CodeQL customization packs see the section [CodeQL customiza
 The CodeQL bundle application can be installed using `pip` with the command:
 
 ```bash
-python3.11 -m pip install https://github.com/rvermeulen/codeql-bundle/releases/download/v0.1.5/codeql_bundle-0.1.5-py3-none-any.whl
+python3.11 -m pip install https://github.com/rvermeulen/codeql-bundle/releases/download/v0.1.8/codeql_bundle-0.1.8-py3-none-any.whl
 ```
 
 ## Usage
@@ -31,7 +31,14 @@ You can see the packs available in your workspace by running `codeql pack ls -- 
 With both a CodeQL bundle and a CodeQL workspace you can create a bundle with the command:
 
 ```bash
-codeql-bundle --bundle <path-to-bundle> --output codeql-custom-bundle.tar.gz --workspace <path-to-workspace> --log INFO
+codeql-bundle --bundle <path-to-bundle> --output codeql-custom-bundle.tar.gz --workspace <path-to-workspace> --log INFO <packs>
+```
+
+If the source bundle is the platform agnostic bundle then you can create platform specific bundles to reduce the size of the used bundle(s).
+The following example creates platform specific bundles for all the currently supported platforms.
+
+```bash
+codeql-bundle --bundle <path-to-platform-agnostic-bundle> --output <path-to-bundles-dir> --workspace <path-to-workspace> --log INFO -p linux64 -p osx64 -p win64 <packs>
 ```
 
 ## CodeQL customization packs
