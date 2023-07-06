@@ -229,7 +229,7 @@ class CustomBundle(Bundle):
                             logger.debug(f"Adding stdlib dependency {std_lib_dep.config.name}@{str(std_lib_dep.config.version)} to {pack.config.name}@{str(pack.config.version)}")
                             pack.dependencies.append(std_lib_dep)
                 logger.debug(f"Adding pack {pack.config.name}@{str(pack.config.version)} to dependency graph")
-                pack_sorter.add(pack, *pack.dependencies)
+                pack_sorter.add(pack)
                 for dep in pack.dependencies:
                     if dep not in processed_packs:
                         add_to_graph(dep, processed_packs, std_lib_deps)
