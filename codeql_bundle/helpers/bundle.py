@@ -296,7 +296,7 @@ class CustomBundle(Bundle):
                             logger.debug(f"Adding stdlib dependency {std_lib_dep.config.name}@{str(std_lib_dep.config.version)} to {pack.config.name}@{str(pack.config.version)}")
                             pack.dependencies.append(std_lib_dep)
                 logger.debug(f"Adding pack {pack.config.name}@{str(pack.config.version)} to dependency graph")
-                pack_sorter.add(pack)
+                pack_sorter.add(pack, *pack.dependencies)
                 for dep in pack.dependencies:
                     if dep not in processed_packs:
                         add_to_graph(dep, processed_packs, std_lib_deps)
@@ -537,7 +537,9 @@ class CustomBundle(Bundle):
                     self.bundle_path / "qlpacks",
                 )
 
-        for pack in pack_sorter.static_order():
+        sorted_packs = list(pack_sorter.static_order())
+        logger.debug(f"Sorted packs: {' -> '.join(map(lambda p: p.config.name, sorted_packs))}")
+        for pack in sorted_packs:
             if pack.kind == CodeQLPackKind.CUSTOMIZATION_PACK:
                 bundle_customization_pack(pack)
             elif pack.kind == CodeQLPackKind.LIBRARY_PACK:
