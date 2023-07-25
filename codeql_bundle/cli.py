@@ -11,7 +11,7 @@ import click
 from pathlib import Path
 from codeql_bundle.helpers.codeql import CodeQLException
 from codeql_bundle.helpers.bundle import CustomBundle, BundleException, BundlePlatform
-from typing import List
+from typing import List, Optional
 import sys
 import logging
 
@@ -50,6 +50,7 @@ logger = logging.getLogger(__name__)
     default="WARNING",
 )
 @click.option("-p", "--platform", multiple=True, type=click.Choice(["linux64", "osx64", "win64"], case_sensitive=False), help="Target platform for the bundle")
+@click.option("-c", "--code-scanning-config", type=click.Path(exists=True, path_type=Path), help="Path to a Code Scanning configuration file that will be the default for the bundle")
 @click.argument("packs", nargs=-1, required=True)
 def main(
     bundle_path: Path,
@@ -57,6 +58,7 @@ def main(
     workspace: Path,
     loglevel: str,
     platform: List[str],
+    code_scanning_config: Optional[Path],
     packs: List[str],
 ) -> None:
 
@@ -119,6 +121,9 @@ def main(
             f"Adding the pack(s) {','.join(map(lambda p: p.config.name, selected_packs))} and its workspace dependencies to the custom bundle."
         )
         bundle.add_packs(*selected_packs)
+        if code_scanning_config:
+            logger.info(f"Adding the Code Scanning configuration file {code_scanning_config} to the custom bundle.")
+            bundle.add_code_scanning_config(code_scanning_config)
         logger.info(f"Bundling custom bundle(s) at {output}")
         platforms = set(map(BundlePlatform.from_string, platform))
         bundle.bundle(output, platforms)
