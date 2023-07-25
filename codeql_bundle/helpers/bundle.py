@@ -550,7 +550,14 @@ class CustomBundle(Bundle):
             elif pack.kind == CodeQLPackKind.QUERY_PACK:
                 bundle_query_pack(pack)
 
-    def bundle(self, output_path: Path, platforms: set[BundlePlatform] = set()):
+    def add_code_scanning_config(self, default_config: Path):
+        if not default_config.exists():
+            raise BundleException(f"Default config {default_config} does not exist.")
+        if not default_config.is_file():
+            raise BundleException(f"Default config {default_config} is not a file.")
+        shutil.copy(default_config, self.bundle_path / "default-codeql-config.yml")
+
+    def bundle(self, output_path: Path, platforms: set[BundlePlatform] = set(), default_config : Optional[Path] = None):
         if len(platforms) == 0:
             if output_path.is_dir():
                 output_path = output_path / "codeql-bundle.tar.gz"
