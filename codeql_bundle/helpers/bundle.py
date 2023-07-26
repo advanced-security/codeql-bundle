@@ -296,6 +296,9 @@ class CustomBundle(Bundle):
                             logger.debug(f"Adding stdlib dependency {std_lib_dep.config.name}@{str(std_lib_dep.config.version)} to {pack.config.name}@{str(pack.config.version)}")
                             pack.dependencies.append(std_lib_dep)
                 logger.debug(f"Adding pack {pack.config.name}@{str(pack.config.version)} to dependency graph")
+                # We include standard library packs in the dependency graph to ensure they dictate the correct order
+                # when we need to customize packs.
+                # This does mean we will repack them, but that is only small price to pay for simplicity.
                 pack_sorter.add(pack, *pack.dependencies)
                 for dep in pack.dependencies:
                     if dep not in processed_packs:
