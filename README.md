@@ -31,14 +31,20 @@ You can see the packs available in your workspace by running `codeql pack ls -- 
 With both a CodeQL bundle and a CodeQL workspace you can create a bundle with the command:
 
 ```bash
-codeql-bundle --bundle <path-to-bundle> --output codeql-custom-bundle.tar.gz --workspace <path-to-workspace> --log INFO <packs>
+codeql-bundle --bundle <path-to-bundle> --output codeql-custom-bundle.tar.gz --workspace <path-to-workspace-file> --log INFO <packs>
 ```
 
 If the source bundle is the platform agnostic bundle then you can create platform specific bundles to reduce the size of the used bundle(s).
 The following example creates platform specific bundles for all the currently supported platforms.
 
 ```bash
-codeql-bundle --bundle <path-to-platform-agnostic-bundle> --output <path-to-bundles-dir> --workspace <path-to-workspace> --log INFO -p linux64 -p osx64 -p win64 <packs>
+codeql-bundle --bundle <path-to-platform-agnostic-bundle> --output <path-to-bundles-dir> --workspace <path-to-workspace-file> --log INFO -p linux64 -p osx64 -p win64 <packs>
+```
+
+An example of creation of a custom bundle for OSX containing a customization pack with the name `foo/cpp-customizations` would look as follows:
+
+```bash
+codeql-bundle --bundle codeql-bundle-osx64.tar.gz --output codeql-custom-bundle --workspace codeql-workspace.yml  --log INFO foo/cpp-customizations -p osx64
 ```
 
 ## CodeQL customization packs
@@ -62,6 +68,18 @@ This example targets the C/C++ language, but you can use this for any supported 
 2. Turn the pack into a library pack `sed -i '' -e 's/library: false/library: true/' cpp-customizations/qlpack.yml`.
 3. Add a dependency on `codeql/cpp-all` with `codeql pack add --dir=cpp-customizations codeql/cpp-all`
 4. Implement the customizations module with `mkdir -p cpp-customizations/foo/cpp_customizations && echo "import cpp" > cpp-customizations/foo/cpp_customizations/Customizations.qll`
+
+To verify that the customization pack was correctly imported one can check that it is listed as a dependency in the standard library pack it was added to. It will look as follows (for example for a pack named `foo/cpp-customizations` added to `codeql/cpp-all`):
+
+#### **`codeql/qlpacks/codeql/cpp-all/<version-number-standard-library-used>/qlpack.yml`**
+```
+...
+dependencies:
+  ...
+  ...
+  foo/cpp-customizationss: 0.0.1
+...
+```
 
 ## Limitations
 
