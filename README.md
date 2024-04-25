@@ -31,7 +31,7 @@ You can see the packs available in your workspace by running `codeql pack ls -- 
 With both a CodeQL bundle and a CodeQL workspace you can create a bundle with the command:
 
 ```bash
-codeql-bundle --bundle <path-to-bundle> --output codeql-custom-bundle.tar.gz --workspace <path-to-workspace-file> --log INFO <packs>
+codeql-bundle --bundle <path-to-bundle> --output codeql-custom-bundle.tar.gz --workspace <path-to-codeql-workspace.yml> --log INFO <packs>
 ```
 
 If the source bundle is the platform agnostic bundle then you can create platform specific bundles to reduce the size of the used bundle(s).
