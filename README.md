@@ -44,7 +44,7 @@ codeql-bundle --bundle <path-to-platform-agnostic-bundle> --output <path-to-bund
 An example of creation of a custom bundle for OSX containing a customization pack with the name `foo/cpp-customizations` would look as follows:
 
 ```bash
-codeql-bundle --bundle codeql-bundle-osx64.tar.gz --output codeql-custom-bundle --workspace codeql-workspace.yml  --log INFO foo/cpp-customizations -p osx64
+codeql-bundle --bundle codeql-bundle-osx64.tar.gz --output codeql-custom-bundle --workspace codeql-workspace.yml  --log INFO foo/cpp-customizations
 ```
 
 ## CodeQL customization packs
