@@ -144,6 +144,8 @@ class BundlePlatform(Enum):
 class Bundle:
     def __init__(self, bundle_path: Path) -> None:
         self.tmp_dir = TemporaryDirectory()
+        self.disable_precompilation = False 
+
         if bundle_path.is_dir():
             self.bundle_path = Path(self.tmp_dir.name) / bundle_path.name
             shutil.copytree(
@@ -190,7 +192,8 @@ class Bundle:
         elif current_system == "Windows" and BundlePlatform.WINDOWS not in self.platforms:
             raise BundleException("Bundle doesn't support Windows!")
 
-        self.codeql = CodeQL(self.bundle_path / "codeql")
+        self.codeql = CodeQL(self.bundle_codeql_exe)
+
         try:
             logging.info(f"Validating the CodeQL CLI version part of the bundle.")
             unpacked_location = self.codeql.unpacked_location()
@@ -215,12 +218,28 @@ class Bundle:
                 f"Removing temporary directory {self.tmp_dir.name} used to build custom bundle."
             )
             self.tmp_dir.cleanup()
-
+    
     def get_bundle_packs(self) -> List[ResolvedCodeQLPack]:
         return self.bundle_packs
 
     def supports_platform(self, platform: BundlePlatform) -> bool:
         return platform in self.platforms
+        
+    @property
+    def bundle_codeql_exe(self):
+        if platform.system() == "Windows":
+            return self.bundle_path / "codeql.exe"
+        
+        return self.bundle_path / "codeql"
+    
+    @property
+    def disable_precompilation(self):
+        return self._disable_precompilation
+    
+    @disable_precompilation.setter
+    def disable_precompilation(self, value: bool):
+        self._disable_precompilation = value
+
 
 class CustomBundle(Bundle):
     def __init__(self, bundle_path: Path, workspace_path: Path = Path.cwd()) -> None:
@@ -341,7 +360,7 @@ class CustomBundle(Bundle):
                 f"Bundling the customization pack {customization_pack_copy.config.name} at {customization_pack_copy.path}"
             )
             self.codeql.pack_bundle(
-                customization_pack_copy, self.bundle_path / "qlpacks"
+                customization_pack_copy, self.bundle_path / "qlpacks", disable_precompilation=self.disable_precompilation
             )
 
         def copy_pack(pack: ResolvedCodeQLPack) -> ResolvedCodeQLPack:
@@ -470,13 +489,14 @@ class CustomBundle(Bundle):
             logging.debug(
                 f"Bundling the standard library pack {pack_copy.config.name} at {pack_copy.path}"
             )
-            self.codeql.pack_bundle(pack_copy, self.bundle_path / "qlpacks")
+            self.codeql.pack_bundle(pack_copy, self.bundle_path / "qlpacks", disable_precompilation=self.disable_precompilation)
 
         def bundle_library_pack(library_pack: ResolvedCodeQLPack):
             logging.info(f"Bundling the library pack {library_pack.config.name}.")
             self.codeql.pack_bundle(
                 library_pack,
                 self.bundle_path / "qlpacks",
+                disable_precompilation=self.disable_precompilation
             )
 
         def bundle_query_pack(pack: ResolvedCodeQLPack):
@@ -520,8 +540,7 @@ class CustomBundle(Bundle):
                 self.codeql.pack_create(
                     pack_copy,
                     self.bundle_path / "qlpacks",
-                    self.bundle_path,
-                )
+                    self.bundle_path)
             else:
                 logging.info(f"Bundling the query pack {pack.config.name}.")
                 pack_copy = copy_pack(pack)
@@ -537,8 +556,7 @@ class CustomBundle(Bundle):
 
                 self.codeql.pack_create(
                     pack_copy,
-                    self.bundle_path / "qlpacks",
-                )
+                    self.bundle_path / "qlpacks")
 
         sorted_packs = list(pack_sorter.static_order())
         logger.debug(f"Sorted packs: {' -> '.join(map(lambda p: p.config.name, sorted_packs))}")

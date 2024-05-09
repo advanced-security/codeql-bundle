@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
     type=click.Path(exists=True, path_type=Path),
     default=Path.cwd(),
 )
+@click.option('--no-precompile', '-nc', is_flag=True, help="Do not pre-compile the bundle.")
 @click.option(
     "-l",
     "--log",
@@ -56,6 +57,7 @@ def main(
     bundle_path: Path,
     output: Path,
     workspace: Path,
+    no_precompile: bool,
     loglevel: str,
     platform: List[str],
     code_scanning_config: Optional[Path],
@@ -82,6 +84,8 @@ def main(
 
     try:
         bundle = CustomBundle(bundle_path, workspace)
+        # options for custom bundle 
+        bundle.disable_precompilation = no_precompile
 
         unsupported_platforms = list(filter(lambda p: not bundle.supports_platform(BundlePlatform.from_string(p)), platform))
         if len(unsupported_platforms) > 0:
