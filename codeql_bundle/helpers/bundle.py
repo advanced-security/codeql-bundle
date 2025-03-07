@@ -459,7 +459,7 @@ class CustomBundle(Bundle):
                     f"import {customization_pack.get_module_name()}.Customizations"
                 )
             with pack_copy.get_customizations_module_path().open("w") as fd:
-                fd.writelines(contents)
+                fd.writelines(map(lambda content: content + "\n", contents))
 
             # Remove the original target library pack
             logging.debug(
