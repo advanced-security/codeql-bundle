@@ -65,6 +65,14 @@ class CodeQL:
         self.codeql_path = codeql_path
         self._version = None
 
+    @property
+    def disable_precompilation(self):
+        return self._disable_precompilation
+    
+    @disable_precompilation.setter
+    def disable_precompilation(self, value: bool):
+        self._disable_precompilation = value
+
     def _exec(self, command: str, *args: str) -> subprocess.CompletedProcess[str]:
         logger.debug(
             f"Running CodeQL command: {command} with arguments: {' '.join(args)}"
@@ -124,11 +132,18 @@ class CodeQL:
         pack: CodeQLPack,
         output_path: Path,
         *additional_packs: Path,
+        disable_precompilation = False
     ):
         if not pack.config.library:
             raise CodeQLException(f"Cannot bundle non-library pack {pack.config.name}!")
 
         args = ["bundle", "--format=json", f"--pack-path={output_path}"]
+        if disable_precompilation:
+            args.append("--no-precompile")
+            logging.warn(
+                f"NOTE: Precompilation is disabled for {pack.config.name}! This may result in slower query execution."
+             )
+
         if len(additional_packs) > 0:
             args.append(f"--additional-packs={':'.join(map(str,additional_packs))}")
         cp = self._exec(
@@ -146,11 +161,18 @@ class CodeQL:
         pack: CodeQLPack,
         output_path: Path,
         *additional_packs: Path,
+        disable_precompilation = False
     ):
         if pack.config.library:
             raise CodeQLException(f"Cannot bundle non-query pack {pack.config.name}!")
 
         args = ["create", "--format=json", f"--output={output_path}", "--threads=0", "--no-default-compilation-cache"]
+        if disable_precompilation:
+            args.append("--no-precompile")
+            logging.warn(
+                f"NOTE: Precompilation is disabled for {pack.config.name}! This may result in slower query execution."
+            )
+
         if self.supports_qlx():
             args.append("--qlx")
         if len(additional_packs) > 0:
