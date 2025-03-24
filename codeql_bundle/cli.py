@@ -14,6 +14,7 @@ from codeql_bundle.helpers.bundle import CustomBundle, BundleException, BundlePl
 from typing import List, Optional
 import sys
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,9 @@ logger = logging.getLogger(__name__)
     default=Path.cwd(),
 )
 @click.option(
+    "--no-precompile", "-nc", is_flag=True, help="Do not pre-compile the bundle."
+)
+@click.option(
     "-l",
     "--log",
     "loglevel",
@@ -49,16 +53,35 @@ logger = logging.getLogger(__name__)
     ),
     default="WARNING",
 )
-@click.option("-p", "--platform", multiple=True, type=click.Choice(["linux64", "osx64", "win64"], case_sensitive=False), help="Target platform for the bundle")
-@click.option("-c", "--code-scanning-config", type=click.Path(exists=True, path_type=Path), help="Path to a Code Scanning configuration file that will be the default for the bundle")
+@click.option(
+    "-p",
+    "--platform",
+    multiple=True,
+    type=click.Choice(["linux64", "osx64", "win64"], case_sensitive=False),
+    help="Target platform for the bundle",
+)
+@click.option(
+    "-c",
+    "--code-scanning-config",
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to a Code Scanning configuration file that will be the default for the bundle",
+)
+@click.option(
+    "-a",
+    "--additional-data-config",
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to a JSON file specifying additional data to install into the bundle",
+)
 @click.argument("packs", nargs=-1, required=True)
 def main(
     bundle_path: Path,
     output: Path,
     workspace: Path,
+    no_precompile: bool,
     loglevel: str,
     platform: List[str],
     code_scanning_config: Optional[Path],
+    additional_data_config: Optional[Path],
     packs: List[str],
 ) -> None:
 
@@ -73,6 +96,8 @@ def main(
             level=getattr(logging, loglevel.upper()),
         )
 
+    workspace = Path(os.path.abspath(workspace))
+
     if workspace.name == "codeql-workspace.yml":
         workspace = workspace.parent
 
@@ -82,8 +107,15 @@ def main(
 
     try:
         bundle = CustomBundle(bundle_path, workspace)
+        # options for custom bundle
+        bundle.disable_precompilation = no_precompile
 
-        unsupported_platforms = list(filter(lambda p: not bundle.supports_platform(BundlePlatform.from_string(p)), platform))
+        unsupported_platforms = list(
+            filter(
+                lambda p: not bundle.supports_platform(BundlePlatform.from_string(p)),
+                platform,
+            )
+        )
         if len(unsupported_platforms) > 0:
             logger.fatal(
                 f"The provided bundle supports the platform(s) {', '.join(map(str, bundle.platforms))}, but doesn't support the following platform(s): {', '.join(unsupported_platforms)}"
@@ -109,7 +141,6 @@ def main(
         else:
             selected_packs = packs_in_workspace
 
-        
         missing_packs = set(packs) - {pack.config.name for pack in selected_packs}
         if len(missing_packs) > 0:
             logger.fatal(
@@ -121,8 +152,15 @@ def main(
             f"Adding the pack(s) {','.join(map(lambda p: p.config.name, selected_packs))} and its workspace dependencies to the custom bundle."
         )
         bundle.add_packs(*selected_packs)
+        if additional_data_config:
+            logger.info(
+                f"Installing additions specified in the config file {additional_data_config} to the custom bundle."
+            )
+            bundle.add_files_and_certs(additional_data_config, workspace)
         if code_scanning_config:
-            logger.info(f"Adding the Code Scanning configuration file {code_scanning_config} to the custom bundle.")
+            logger.info(
+                f"Adding the Code Scanning configuration file {code_scanning_config} to the custom bundle."
+            )
             bundle.add_code_scanning_config(code_scanning_config)
         logger.info(f"Bundling custom bundle(s) at {output}")
         platforms = set(map(BundlePlatform.from_string, platform))
