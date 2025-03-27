@@ -566,8 +566,11 @@ class CustomBundle(Bundle):
 
         def bundle_library_pack(library_pack: ResolvedCodeQLPack):
             logging.info(f"Bundling the library pack {library_pack.config.name}.")
+
+            pack_copy = copy_pack(library_pack)
+
             self.codeql.pack_bundle(
-                library_pack,
+                pack_copy,
                 self.bundle_path / "qlpacks",
                 disable_precompilation=self.disable_precompilation,
             )
