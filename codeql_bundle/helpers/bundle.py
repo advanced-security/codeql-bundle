@@ -614,7 +614,8 @@ class CustomBundle(Bundle):
                 )
                 # Recompile the query pack with the assumption that all its dependencies are now in the bundle.
                 self.codeql.pack_create(
-                    pack_copy, self.bundle_path / "qlpacks", self.bundle_path
+                    pack_copy, self.bundle_path / "qlpacks", self.bundle_path,
+                    disable_precompilation=self.disable_precompilation
                 )
             else:
                 logging.info(f"Bundling the query pack {pack.config.name}.")
@@ -632,7 +633,8 @@ class CustomBundle(Bundle):
                 with pack_copy.path.open("w") as fd:
                     yaml.dump(qlpack_spec, fd)
 
-                self.codeql.pack_create(pack_copy, self.bundle_path / "qlpacks")
+                self.codeql.pack_create(pack_copy, self.bundle_path / "qlpacks",
+                                        disable_precompilation=self.disable_precompilation)
 
         sorted_packs = list(pack_sorter.static_order())
         logger.debug(
