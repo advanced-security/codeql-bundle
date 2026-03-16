@@ -72,6 +72,12 @@ logger = logging.getLogger(__name__)
     type=click.Path(exists=True, path_type=Path),
     help="Path to a JSON file specifying additional data to install into the bundle",
 )
+@click.option(
+    "-M",
+    "--ram",
+    type=click.Int,
+    help="Set total amount of RAM that the compiler should be allowed to use.",
+)
 @click.argument("packs", nargs=-1, required=True)
 def main(
     bundle_path: Path,
@@ -82,6 +88,7 @@ def main(
     platform: List[str],
     code_scanning_config: Optional[Path],
     additional_data_config: Optional[Path],
+    ram: Optional[int],
     packs: List[str],
 ) -> None:
 
@@ -109,6 +116,7 @@ def main(
         bundle = CustomBundle(bundle_path, workspace)
         # options for custom bundle
         bundle.disable_precompilation = no_precompile
+        bundle.ram = ram
 
         unsupported_platforms = list(
             filter(

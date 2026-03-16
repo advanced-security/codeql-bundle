@@ -278,6 +278,15 @@ class Bundle:
     def disable_precompilation(self, value: bool):
         self._disable_precompilation = value
 
+    @property
+    def ram(self):
+        return self.codeql.ram
+
+    @ram.setter
+    def ram(self, value: int):
+        self.codeql.ram = value
+
+
 
 class CustomBundle(Bundle):
     def __init__(self, bundle_path: Path, workspace_path: Path = Path.cwd()) -> None:
