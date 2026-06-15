@@ -157,6 +157,7 @@ class CodeQL:
             args.append(f"--additional-packs={':'.join(map(str,additional_packs))}")
 
         if self.ram is not None:
+            logging.info(f"Using {self.ram} MB of RAM for packing {pack.config.name}.")
             args.append(f"--ram={self.ram}")
 
         cp = self._exec(
@@ -191,6 +192,7 @@ class CodeQL:
         if len(additional_packs) > 0:
             args.append(f"--additional-packs={':'.join(map(str,additional_packs))}")
         if self.ram is not None:
+            logging.info(f"Using {self.ram} MB of RAM for packing {pack.config.name}.")
             args.append(f"--ram={self.ram}")
         cp = self._exec(
             "pack",

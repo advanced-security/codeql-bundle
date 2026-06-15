@@ -75,7 +75,7 @@ logger = logging.getLogger(__name__)
 @click.option(
     "-M",
     "--ram",
-    type=click.Int,
+    type=click.INT,
     help="Set total amount of RAM that the compiler should be allowed to use.",
 )
 @click.argument("packs", nargs=-1, required=True)
