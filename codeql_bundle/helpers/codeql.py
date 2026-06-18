@@ -64,6 +64,7 @@ class CodeQL:
     def __init__(self, codeql_path: Path):
         self.codeql_path = codeql_path
         self._version = None
+        self._ram = None
 
     @property
     def disable_precompilation(self):
@@ -72,6 +73,14 @@ class CodeQL:
     @disable_precompilation.setter
     def disable_precompilation(self, value: bool):
         self._disable_precompilation = value
+
+    @property
+    def ram(self):
+        return self._ram
+
+    @ram.setter
+    def ram(self, value: int):
+        self._ram = value
 
     def _exec(self, command: str, *args: str) -> subprocess.CompletedProcess[str]:
         logger.debug(
@@ -84,7 +93,7 @@ class CodeQL:
         )
 
     def version(self) -> Version:
-        if self._version != None:
+        if self._version is not None:
             return self._version
         else:
             cp = self._exec("version", "--format=json")
@@ -137,7 +146,7 @@ class CodeQL:
         if not pack.config.library:
             raise CodeQLException(f"Cannot bundle non-library pack {pack.config.name}!")
 
-        args = ["bundle", "--format=json", f"--pack-path={output_path}"]
+        args = ["bundle", "--format=json", f"--pack-path={output_path}", "--threads=0"]
         if disable_precompilation:
             args.append("--no-precompile")
             logging.warn(
@@ -146,6 +155,11 @@ class CodeQL:
 
         if len(additional_packs) > 0:
             args.append(f"--additional-packs={':'.join(map(str,additional_packs))}")
+
+        if self.ram is not None:
+            logging.info(f"Using {self.ram} MB of RAM for bundling {pack.config.name}.")
+            args.append(f"--ram={self.ram}")
+
         cp = self._exec(
             "pack",
             *args,
@@ -177,6 +191,9 @@ class CodeQL:
             args.append("--qlx")
         if len(additional_packs) > 0:
             args.append(f"--additional-packs={':'.join(map(str,additional_packs))}")
+        if self.ram is not None:
+            logging.info(f"Using {self.ram} MB of RAM for packing {pack.config.name}.")
+            args.append(f"--ram={self.ram}")
         cp = self._exec(
             "pack",
             *args,
