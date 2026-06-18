@@ -146,7 +146,7 @@ class CodeQL:
         if not pack.config.library:
             raise CodeQLException(f"Cannot bundle non-library pack {pack.config.name}!")
 
-        args = ["bundle", "--format=json", f"--pack-path={output_path}"]
+        args = ["bundle", "--format=json", f"--pack-path={output_path}", "--threads=0"]
         if disable_precompilation:
             args.append("--no-precompile")
             logging.warn(
@@ -157,7 +157,7 @@ class CodeQL:
             args.append(f"--additional-packs={':'.join(map(str,additional_packs))}")
 
         if self.ram is not None:
-            logging.info(f"Using {self.ram} MB of RAM for packing {pack.config.name}.")
+            logging.info(f"Using {self.ram} MB of RAM for bundling {pack.config.name}.")
             args.append(f"--ram={self.ram}")
 
         cp = self._exec(
