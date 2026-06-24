@@ -72,6 +72,13 @@ logger = logging.getLogger(__name__)
     type=click.Path(exists=True, path_type=Path),
     help="Path to a JSON file specifying additional data to install into the bundle",
 )
+@click.option(
+    "-j",
+    "--threads",
+    type=click.INT,
+    help="Use this many threads to compile queries.",
+)
+
 @click.argument("packs", nargs=-1, required=True)
 def main(
     bundle_path: Path,
@@ -82,6 +89,7 @@ def main(
     platform: List[str],
     code_scanning_config: Optional[Path],
     additional_data_config: Optional[Path],
+    threads: Optional[int],
     packs: List[str],
 ) -> None:
 
@@ -109,6 +117,7 @@ def main(
         bundle = CustomBundle(bundle_path, workspace)
         # options for custom bundle
         bundle.disable_precompilation = no_precompile
+        bundle.threads = threads
 
         unsupported_platforms = list(
             filter(

@@ -64,6 +64,7 @@ class CodeQL:
     def __init__(self, codeql_path: Path):
         self.codeql_path = codeql_path
         self._version = None
+        self._threads = None
 
     @property
     def disable_precompilation(self):
@@ -72,6 +73,14 @@ class CodeQL:
     @disable_precompilation.setter
     def disable_precompilation(self, value: bool):
         self._disable_precompilation = value
+    
+    @property
+    def threads(self):
+        return self._threads
+
+    @threads.setter
+    def threads(self, value: int):
+        self._threads = value
 
     def _exec(self, command: str, *args: str) -> subprocess.CompletedProcess[str]:
         logger.debug(
@@ -166,7 +175,14 @@ class CodeQL:
         if pack.config.library:
             raise CodeQLException(f"Cannot bundle non-query pack {pack.config.name}!")
 
-        args = ["create", "--format=json", f"--output={output_path}", "--threads=0", "--no-default-compilation-cache"]
+        args = ["create", "--format=json", f"--output={output_path}", "--no-default-compilation-cache"]
+
+        if self.threads is not None:
+            logging.info(f"Using {self.threads} threads for bundling {pack.config.name}.")
+            args.append(f"--threads={self.threads}")
+        else:
+            args.append(f"--threads=0")
+            
         if disable_precompilation:
             args.append("--no-precompile")
             logging.warn(
