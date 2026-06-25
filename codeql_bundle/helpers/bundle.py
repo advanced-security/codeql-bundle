@@ -278,6 +278,13 @@ class Bundle:
     def disable_precompilation(self, value: bool):
         self._disable_precompilation = value
 
+    @property
+    def threads(self):
+        return self.codeql.threads
+
+    @threads.setter
+    def threads(self, value: int):
+        self.codeql.threads= value
 
 class CustomBundle(Bundle):
     def __init__(self, bundle_path: Path, workspace_path: Path = Path.cwd()) -> None:
