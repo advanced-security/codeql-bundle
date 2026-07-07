@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "codeql-bundle"
-version = "0.4.2"
+version = "0.5.0"
 description = "Tool to create custom CodeQL bundles"
 authors = ["Remco Vermeulen <rvermeulen@users.noreply.github.com>"]
 readme = "README.md"
@@ -17,6 +17,7 @@ jsonschema = "^4.22.0"
 
 [tool.poetry.scripts]
 codeql-bundle = 'codeql_bundle.cli:main'
+codeql-bundle-cache = 'codeql_bundle.cache_cli:run'
 
 [build-system]
 requires = ["poetry-core"]
