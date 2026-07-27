@@ -318,7 +318,7 @@ def build_cache(
         ram=ram,
         compilation_cache_size=cache_size,
     )
-    logger.info(compilation.stderr)
+    logger.debug(compilation.stderr)
 
     representative_query = _representative_query(query_packs)
     verification = bundle.codeql.query_compile(
