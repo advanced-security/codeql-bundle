@@ -431,9 +431,7 @@ def download_file(
     destination.parent.mkdir(parents=True, exist_ok=True)
 
     if destination.exists():
-        if expected_sha256 is None and expected_size is None:
-            destination.unlink()
-        elif expected_size is not None and destination.stat().st_size != expected_size:
+        if expected_size is not None and destination.stat().st_size != expected_size:
             destination.unlink()
         else:
             digest = sha256_file(destination)
