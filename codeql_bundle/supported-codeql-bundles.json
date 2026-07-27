@@ -1,0 +1,5 @@
+{
+  "$schema": "./supported-codeql-bundles.schema.json",
+  "schema_version": 1,
+  "bundles": []
+}

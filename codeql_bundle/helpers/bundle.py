@@ -2,7 +2,7 @@ from .codeql import CodeQL, CodeQLException, CodeQLPack
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import tarfile
-from typing import List, cast, Callable, Optional
+from typing import Iterable, List, cast, Callable, Optional
 from collections import defaultdict
 import shutil
 import yaml
@@ -17,6 +17,11 @@ from dataclasses import dataclass
 from graphlib import TopologicalSorter
 import platform
 import concurrent.futures
+from codeql_bundle.cache import (
+    CompilationCacheManager,
+    compute_pack_fingerprint,
+    safe_extract_tar,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +150,50 @@ def build_pack_resolver(
     return builder()
 
 
+def is_dependent_on(
+    pack: ResolvedCodeQLPack,
+    other: ResolvedCodeQLPack,
+    visited: Optional[set[ResolvedCodeQLPack]] = None,
+) -> bool:
+    if other in pack.dependencies:
+        return True
+    visited = set() if visited is None else visited
+    if pack in visited:
+        return False
+    visited.add(pack)
+    return any(
+        is_dependent_on(dependency, other, visited)
+        for dependency in pack.dependencies
+    )
+
+
+def get_compilation_cache_targets(
+    packs: Iterable[ResolvedCodeQLPack],
+) -> dict[ResolvedCodeQLPack, List[ResolvedCodeQLPack]]:
+    packs = list(packs)
+    query_packs = [
+        pack
+        for pack in packs
+        if pack.kind == CodeQLPackKind.QUERY_PACK
+        and pack.config.get_scope() == "codeql"
+    ]
+    targets = {}
+    for pack in packs:
+        if (
+            pack.config.library
+            and pack.config.get_scope() == "codeql"
+            and pack.config.get_pack_name().endswith("-all")
+        ):
+            dependent_query_packs = [
+                query_pack
+                for query_pack in query_packs
+                if is_dependent_on(query_pack, pack)
+            ]
+            if dependent_query_packs:
+                targets[pack] = dependent_query_packs
+    return targets
+
+
 @verify(UNIQUE)
 class BundlePlatform(Enum):
     LINUX = 1
@@ -188,8 +237,7 @@ class Bundle:
             logging.info(
                 f"Unpacking provided bundle {bundle_path} to {self.tmp_dir.name}."
             )
-            file = tarfile.open(bundle_path)
-            file.extractall(self.tmp_dir.name)
+            safe_extract_tar(bundle_path, Path(self.tmp_dir.name))
             self.bundle_path = Path(self.tmp_dir.name) / "codeql"
         else:
             raise BundleException("Invalid CodeQL bundle path")
@@ -260,6 +308,9 @@ class Bundle:
     def get_bundle_packs(self) -> List[ResolvedCodeQLPack]:
         return self.bundle_packs
 
+    def pack_fingerprint(self) -> str:
+        return compute_pack_fingerprint(str(self.codeql.version()), self.bundle_packs)
+
     def supports_platform(self, platform: BundlePlatform) -> bool:
         return platform in self.platforms
 
@@ -287,8 +338,14 @@ class Bundle:
         self.codeql.threads= value
 
 class CustomBundle(Bundle):
-    def __init__(self, bundle_path: Path, workspace_path: Path = Path.cwd()) -> None:
+    def __init__(
+        self,
+        bundle_path: Path,
+        workspace_path: Path = Path.cwd(),
+        compilation_cache_manager: Optional[CompilationCacheManager] = None,
+    ) -> None:
         Bundle.__init__(self, bundle_path)
+        self.compilation_cache_manager = compilation_cache_manager
 
         packs: List[CodeQLPack] = self.codeql.pack_ls(workspace_path)
         # Perform a sanity check on the packs in the workspace.
@@ -394,12 +451,7 @@ class CustomBundle(Bundle):
             if not pack in processed_packs:
                 add_to_graph(pack, processed_packs, std_lib_deps)
 
-        def is_dependent_on(
-            pack: ResolvedCodeQLPack, other: ResolvedCodeQLPack
-        ) -> bool:
-            return other in pack.dependencies or any(
-                map(lambda p: is_dependent_on(p, other), pack.dependencies)
-            )
+        query_pack_caches: dict[ResolvedCodeQLPack, List[Path]] = defaultdict(list)
 
         # Add the stdlib and its dependencies to properly sort the customization packs before the other packs.
         for pack, deps in std_lib_deps.items():
@@ -408,15 +460,27 @@ class CustomBundle(Bundle):
             )
             pack_sorter.add(pack, *deps)
             # Add the standard query packs that rely transitively on the stdlib.
-            for query_pack in [
+            dependent_query_packs = [
                 p
                 for p in self.bundle_packs
                 if p.kind == CodeQLPackKind.QUERY_PACK and is_dependent_on(p, pack)
-            ]:
+            ]
+            for query_pack in dependent_query_packs:
                 logger.debug(
                     f"Adding standard query pack {query_pack.config.name}@{str(query_pack.config.version)} to dependency graph"
                 )
                 pack_sorter.add(query_pack, pack)
+            if (
+                self.compilation_cache_manager is not None
+                and not self.disable_precompilation
+                and dependent_query_packs
+            ):
+                compilation_cache = self.compilation_cache_manager.cache_for(
+                    pack.config.name
+                )
+                if compilation_cache is not None:
+                    for query_pack in dependent_query_packs:
+                        query_pack_caches[query_pack].append(compilation_cache)
 
         def bundle_customization_pack(customization_pack: ResolvedCodeQLPack):
             logging.info(
@@ -435,6 +499,7 @@ class CustomBundle(Bundle):
             qlpack_spec["dependencies"] = {}
             with customization_pack_copy.path.open("w") as fd:
                 yaml.dump(qlpack_spec, fd)
+            customization_pack_copy.get_lock_file_path().unlink(missing_ok=True)
 
             logging.debug(
                 f"Bundling the customization pack {customization_pack_copy.config.name} at {customization_pack_copy.path}"
@@ -622,7 +687,8 @@ class CustomBundle(Bundle):
                 # Recompile the query pack with the assumption that all its dependencies are now in the bundle.
                 self.codeql.pack_create(
                     pack_copy, self.bundle_path / "qlpacks", self.bundle_path,
-                    disable_precompilation=self.disable_precompilation
+                    disable_precompilation=self.disable_precompilation,
+                    compilation_caches=query_pack_caches[pack],
                 )
             else:
                 logging.info(f"Bundling the query pack {pack.config.name}.")
