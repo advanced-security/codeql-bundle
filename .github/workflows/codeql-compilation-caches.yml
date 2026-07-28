@@ -33,7 +33,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CODEQL_BUNDLE_CACHE_DIR: ${{ runner.temp }}/codeql-bundle-cache
+  CODEQL_BUNDLE_CACHE_DIR: ${{ github.workspace }}/.codeql-bundle-cache
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
 jobs:
