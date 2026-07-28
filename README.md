@@ -66,9 +66,12 @@ by their CLI version and pack-content fingerprint.
 Compilation caches are content-addressed by the query, its transitive
 dependencies, and the compiler. Customizing a standard library therefore
 invalidates the entries that depend on the changed library while preserving
-entries for unaffected compiler stages. Cache-aware builds reduce compilation
-time, but they do not eliminate compilation; the speedup depends on the
-customization and query packs involved.
+entries for unaffected compiler stages. Cache-aware builds do not eliminate
+compilation, and broad customizations may invalidate most entries. In those
+cases, cache lookup and write overhead can offset the reused work or make the
+build slightly slower. The performance impact depends on the customization and
+query packs involved; use `--no-compilation-cache` when a representative
+benchmark does not improve.
 
 An input that is not in the catalog remains supported, but is built without
 this optimization and produces a warning. For a catalog-listed bundle, a
