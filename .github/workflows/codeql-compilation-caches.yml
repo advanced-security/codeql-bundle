@@ -43,6 +43,7 @@ jobs:
       cache_release: ${{ steps.version.outputs.cache_release }}
       catalog_branch: ${{ steps.version.outputs.catalog_branch }}
       matrix: ${{ steps.plan.outputs.matrix || '[{"language":"skip","target":"skip"}]' }}
+      cpp: ${{ steps.plan.outputs.cpp || '{"language":"skip","target":"skip"}' }}
       release: ${{ steps.version.outputs.release }}
       skip: ${{ steps.existing.outputs.skip }}
     steps:
@@ -129,7 +130,8 @@ jobs:
             --cache-release "${{ steps.version.outputs.cache_release }}" \
             --output release-plan.json
           echo "cache_release=$(jq -r '.cache_release' release-plan.json)" >> "$GITHUB_OUTPUT"
-          echo "matrix=$(jq -c '.targets' release-plan.json)" >> "$GITHUB_OUTPUT"
+          echo "matrix=$(jq -c '[.targets[] | select(.language != "cpp")]' release-plan.json)" >> "$GITHUB_OUTPUT"
+          echo "cpp=$(jq -c '.targets[] | select(.language == "cpp")' release-plan.json)" >> "$GITHUB_OUTPUT"
 
       - if: steps.existing.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
@@ -141,7 +143,9 @@ jobs:
   build:
     needs: plan
     if: needs.plan.outputs.skip != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.cache.language == 'java' && vars.CODEQL_CACHE_JAVA_RUNNER || 'ubuntu-latest' }}
+    env:
+      CODEQL_CACHE_RAM: ${{ matrix.cache.language == 'java' && vars.CODEQL_CACHE_JAVA_RAM || vars.CODEQL_CACHE_RAM }}
     strategy:
       fail-fast: false
       matrix:
@@ -165,11 +169,18 @@ jobs:
           key: codeql-source-${{ needs.plan.outputs.release }}-${{ runner.os }}
 
       - name: Build and verify cache
+        shell: bash
         run: |
-          codeql-bundle-cache build \
-            --plan release-plan.json \
-            --target "${{ matrix.cache.target }}" \
+          args=(
+            build
+            --plan release-plan.json
+            --target "${{ matrix.cache.target }}"
             --output-dir dist
+          )
+          if [[ -n "$CODEQL_CACHE_RAM" ]]; then
+            args+=(--ram "$CODEQL_CACHE_RAM")
+          fi
+          codeql-bundle-cache "${args[@]}"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -181,10 +192,155 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
+  build-cpp:
+    needs: plan
+    if: needs.plan.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    env:
+      CODEQL_CACHE_RAM: ${{ vars.CODEQL_CACHE_CPP_RAM || vars.CODEQL_CACHE_RAM }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: python -m pip install .
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-plan
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.CODEQL_BUNDLE_CACHE_DIR }}/sources/${{ needs.plan.outputs.release }}
+          key: codeql-source-${{ needs.plan.outputs.release }}-${{ runner.os }}
+
+      - name: Build and verify C++ cache
+        shell: bash
+        run: |
+          args=(
+            build
+            --plan release-plan.json
+            --target "${{ fromJSON(needs.plan.outputs.cpp).target }}"
+            --output-dir dist
+          )
+          if [[ -n "$CODEQL_CACHE_RAM" ]]; then
+            args+=(--ram "$CODEQL_CACHE_RAM")
+          fi
+          codeql-bundle-cache "${args[@]}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cache-${{ fromJSON(needs.plan.outputs.cpp).language }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+            dist/*.metadata.json
+          if-no-files-found: error
+          compression-level: 0
+
+  consumer-test:
+    needs:
+      - plan
+      - build-cpp
+    if: needs.plan.outputs.skip != 'true'
+    runs-on: ${{ vars.CODEQL_CACHE_CONSUMER_RUNNER || 'ubuntu-latest' }}
+    env:
+      CODEQL_CACHE_RAM: ${{ vars.CODEQL_CACHE_CONSUMER_RAM || vars.CODEQL_CACHE_RAM }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: python -m pip install .
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-plan
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: cache-cpp
+          path: dist
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.CODEQL_BUNDLE_CACHE_DIR }}/sources/${{ needs.plan.outputs.release }}
+          key: codeql-source-${{ needs.plan.outputs.release }}-${{ runner.os }}
+
+      - name: Test automatic cache use with a customization
+        shell: bash
+        run: |
+          jq '.targets = [.targets[] | select(.language == "cpp")]' \
+            release-plan.json > cpp-release-plan.json
+          codeql-bundle-cache catalog-entry \
+            --plan cpp-release-plan.json \
+            --assets-dir dist \
+            --validated-platform linux64 \
+            --output candidate-entry.json
+
+          python - <<'PY' > cache-server.log 2>&1 &
+          from functools import partial
+          from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+          from pathlib import Path
+
+          handler = partial(SimpleHTTPRequestHandler, directory="dist")
+          server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+          Path("cache-server-port").write_text(str(server.server_port))
+          server.serve_forever()
+          PY
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for _ in {1..50}; do
+            [[ -s cache-server-port ]] && break
+            sleep 0.1
+          done
+          port="$(cat cache-server-port)"
+          asset_name="$(jq -r '.compilation_caches["codeql/cpp-all"].asset.name' candidate-entry.json)"
+          jq \
+            --arg url "http://127.0.0.1:${port}/${asset_name}" \
+            '{
+              schema_version: 1,
+              bundles: [
+                (. | .compilation_caches["codeql/cpp-all"].asset.url = $url)
+              ]
+            }' \
+            candidate-entry.json > candidate-manifest.json
+
+          mkdir -p "${{ runner.temp }}/custom-bundles"
+          bundle_args=(
+            --bundle "${{ needs.plan.outputs.release }}"
+            --cache-manifest candidate-manifest.json
+            --cache-dir "${{ runner.temp }}/consumer-cache"
+            --output "${{ runner.temp }}/custom-bundles"
+            --workspace tests/workspace
+            --platform linux64
+          )
+          if [[ -n "$CODEQL_CACHE_RAM" ]]; then
+            bundle_args+=(--ram "$CODEQL_CACHE_RAM")
+          fi
+          codeql-bundle "${bundle_args[@]}" foo/cpp-customizations
+          mkdir -p "${{ runner.temp }}/custom-codeql"
+          tar -xzf \
+            "${{ runner.temp }}/custom-bundles/codeql-bundle-linux64.tar.gz" \
+            -C "${{ runner.temp }}/custom-codeql"
+          cp -R tests/workspace "${{ runner.temp }}/test-workspace"
+          rm -rf "${{ runner.temp }}/test-workspace/cpp/foo-customizations"
+          find "${{ runner.temp }}/test-workspace" \
+            -name codeql-pack.lock.yml \
+            -delete
+          "${{ runner.temp }}/custom-codeql/codeql/codeql" test run \
+            --additional-packs="${{ runner.temp }}/custom-codeql/codeql:${{ runner.temp }}/test-workspace" \
+            "${{ runner.temp }}/test-workspace/cpp/foo-bundle-customizations-tests"
+
   verify:
     needs:
       - plan
       - build
+      - build-cpp
     if: needs.plan.outputs.skip != 'true'
     strategy:
       fail-fast: false
@@ -225,6 +381,8 @@ jobs:
     needs:
       - plan
       - build
+      - build-cpp
+      - consumer-test
       - verify
     if: needs.plan.outputs.skip != 'true'
     runs-on: ubuntu-latest
@@ -313,32 +471,6 @@ jobs:
           codeql-bundle-cache update-catalog \
             --catalog codeql_bundle/supported-codeql-bundles.json \
             --entry catalog-entry.json
-
-      - name: Test automatic cache use with a customization
-        if: steps.recheck.outputs.skip != 'true'
-        shell: bash
-        run: |
-          mkdir -p "${{ runner.temp }}/custom-bundles"
-          codeql-bundle \
-            --bundle "${{ needs.plan.outputs.release }}" \
-            --cache-manifest codeql_bundle/supported-codeql-bundles.json \
-            --cache-dir "${{ runner.temp }}/consumer-cache" \
-            --output "${{ runner.temp }}/custom-bundles" \
-            --workspace tests/workspace \
-            --platform linux64 \
-            foo/cpp-customizations
-          mkdir -p "${{ runner.temp }}/custom-codeql"
-          tar -xzf \
-            "${{ runner.temp }}/custom-bundles/codeql-bundle-linux64.tar.gz" \
-            -C "${{ runner.temp }}/custom-codeql"
-          cp -R tests/workspace "${{ runner.temp }}/test-workspace"
-          rm -rf "${{ runner.temp }}/test-workspace/cpp/foo-customizations"
-          find "${{ runner.temp }}/test-workspace" \
-            -name codeql-pack.lock.yml \
-            -delete
-          "${{ runner.temp }}/custom-codeql/codeql/codeql" test run \
-            --additional-packs="${{ runner.temp }}/custom-codeql/codeql:${{ runner.temp }}/test-workspace" \
-            "${{ runner.temp }}/test-workspace/cpp/foo-bundle-customizations-tests"
 
       - name: Open catalog update pull request
         if: steps.recheck.outputs.skip != 'true'

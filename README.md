@@ -77,6 +77,22 @@ missing, unvalidated, or corrupt cache is an error. Use
 `--no-precompile` also skips cache resolution because no query compilation is
 performed.
 
+### Resource tuning
+
+The source tree for the next release after v0.5.0 adds controls for constrained
+or high-capacity build agents:
+
+- `--threads` sets CodeQL compiler parallelism; the default uses all available
+  cores.
+- `--ram` caps the memory in MB available to CodeQL pack compilation.
+- `--compression-level` selects the gzip level for generated bundle archives.
+  The default is 6, which materially reduces archive time with little size
+  increase compared with level 9.
+
+Set RAM below the machine's physical limit so the operating system and archive
+creation retain headroom. Avoid running multiple `pack create` processes with
+`--threads=0` on the same agent because each process will try to use every core.
+
 By default, downloads are stored in the platform cache directory. Override it
 with `--cache-dir` or `CODEQL_BUNDLE_CACHE_DIR`. Use `--cache-manifest` with a
 local path or URL to test a candidate catalog or to operate against a pinned
@@ -130,6 +146,15 @@ Use `workflow_dispatch` with `bundle_version` to backfill a specific release.
 The latest stable release is independent of backfill work; releases from
 v2.18.0 onward can be dispatched separately in any order. `force` rebuilds a
 release that already has a catalog entry or open update pull request.
+
+Repository variables can opt slow cache stages into larger runners without
+changing the workflow:
+
+- `CODEQL_CACHE_JAVA_RUNNER` selects the Java cache-build runner.
+- `CODEQL_CACHE_CONSUMER_RUNNER` selects the customized C++ acceptance runner.
+- `CODEQL_CACHE_RAM` optionally sets a common RAM cap.
+- `CODEQL_CACHE_JAVA_RAM`, `CODEQL_CACHE_CPP_RAM`, and
+  `CODEQL_CACHE_CONSUMER_RAM` override that cap for their respective jobs.
 
 ## CodeQL customization packs
 
