@@ -234,13 +234,13 @@ class CodeQL:
 
         threads = self.threads if self.threads is not None else 0
         if self.threads is not None:
-            logging.info(
-                f"Using {self.threads} threads for bundling {pack.config.name}."
+            logger.info(
+                f"Using {self.threads} threads for creating {pack.config.name}."
             )
         args.append(f"--threads={threads}")
         if self.ram is not None:
             logger.info(
-                f"Using {self.ram} MB of RAM for bundling {pack.config.name}."
+                f"Using {self.ram} MB of RAM for creating {pack.config.name}."
             )
             args.append(f"--ram={self.ram}")
             

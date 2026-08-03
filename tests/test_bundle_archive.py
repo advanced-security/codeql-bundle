@@ -16,7 +16,7 @@ class BundleArchiveTests(unittest.TestCase):
 
             bundle.bundle(output)
 
-            with tarfile.open(output) as archive:
+            with tarfile.open(output, mode="r:gz") as archive:
                 self.assertEqual(b"bundle", archive.extractfile("codeql/file").read())
 
     def test_platform_bundle_excludes_other_platform_tools(self) -> None:
@@ -33,7 +33,10 @@ class BundleArchiveTests(unittest.TestCase):
 
             bundle.bundle(output, {BundlePlatform.LINUX})
 
-            with tarfile.open(output / "codeql-bundle-linux64.tar.gz") as archive:
+            with tarfile.open(
+                output / "codeql-bundle-linux64.tar.gz",
+                mode="r:gz",
+            ) as archive:
                 names = set(archive.getnames())
             self.assertIn("codeql/cpp/tools/linux64/tool", names)
             self.assertNotIn("codeql/cpp/tools/osx64/tool", names)

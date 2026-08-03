@@ -79,8 +79,7 @@ performed.
 
 ### Resource tuning
 
-The source tree for the next release after v0.5.0 adds controls for constrained
-or high-capacity build agents:
+Version 0.5.1 adds controls for constrained or high-capacity build agents:
 
 - `--threads` sets CodeQL compiler parallelism; the default uses all available
   cores.
