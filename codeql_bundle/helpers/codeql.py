@@ -66,6 +66,7 @@ class CodeQL:
         self.codeql_path = codeql_path
         self._version = None
         self._threads = None
+        self._ram = None
 
     @property
     def disable_precompilation(self):
@@ -82,6 +83,14 @@ class CodeQL:
     @threads.setter
     def threads(self, value: int):
         self._threads = value
+
+    @property
+    def ram(self):
+        return self._ram
+
+    @ram.setter
+    def ram(self, value: int):
+        self._ram = value
 
     def _exec(self, command: str, *args: str) -> subprocess.CompletedProcess[str]:
         logger.debug(
@@ -178,7 +187,18 @@ class CodeQL:
         if not pack.config.library:
             raise CodeQLException(f"Cannot bundle non-library pack {pack.config.name}!")
 
-        args = ["bundle", "--format=json", f"--pack-path={output_path}"]
+        threads = self.threads if self.threads is not None else 0
+        args = [
+            "bundle",
+            "--format=json",
+            f"--pack-path={output_path}",
+            f"--threads={threads}",
+        ]
+        if self.ram is not None:
+            logger.info(
+                f"Using {self.ram} MB of RAM for bundling {pack.config.name}."
+            )
+            args.append(f"--ram={self.ram}")
         if disable_precompilation:
             args.append("--no-precompile")
             logging.warn(
@@ -212,11 +232,17 @@ class CodeQL:
 
         args = ["create", "--format=json", f"--output={output_path}", "--no-default-compilation-cache"]
 
+        threads = self.threads if self.threads is not None else 0
         if self.threads is not None:
-            logging.info(f"Using {self.threads} threads for bundling {pack.config.name}.")
-            args.append(f"--threads={self.threads}")
-        else:
-            args.append(f"--threads=0")
+            logger.info(
+                f"Using {self.threads} threads for creating {pack.config.name}."
+            )
+        args.append(f"--threads={threads}")
+        if self.ram is not None:
+            logger.info(
+                f"Using {self.ram} MB of RAM for creating {pack.config.name}."
+            )
+            args.append(f"--ram={self.ram}")
             
         if disable_precompilation:
             args.append("--no-precompile")

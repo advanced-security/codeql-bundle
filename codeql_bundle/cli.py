@@ -10,7 +10,12 @@ if not __package__ and __name__ == "__main__":
 import click
 from pathlib import Path
 from codeql_bundle.helpers.codeql import CodeQLException
-from codeql_bundle.helpers.bundle import CustomBundle, BundleException, BundlePlatform
+from codeql_bundle.helpers.bundle import (
+    DEFAULT_COMPRESSION_LEVEL,
+    BundleException,
+    BundlePlatform,
+    CustomBundle,
+)
 from codeql_bundle.cache import (
     BundleCatalog,
     BundleSourceResolver,
@@ -87,6 +92,19 @@ logger = logging.getLogger(__name__)
     help="Use this many threads to compile queries.",
 )
 @click.option(
+    "-M",
+    "--ram",
+    type=click.IntRange(min=1),
+    help="Set total amount of RAM in MB that the compiler may use.",
+)
+@click.option(
+    "--compression-level",
+    type=click.IntRange(min=0, max=9),
+    default=DEFAULT_COMPRESSION_LEVEL,
+    show_default=True,
+    help="Gzip compression level for generated bundle archives.",
+)
+@click.option(
     "--cache-dir",
     type=click.Path(path_type=Path),
     default=default_cache_dir,
@@ -115,6 +133,8 @@ def main(
     code_scanning_config: Optional[Path],
     additional_data_config: Optional[Path],
     threads: Optional[int],
+    ram: Optional[int],
+    compression_level: int,
     cache_dir: Path,
     cache_manifest: Optional[str],
     no_compilation_cache: bool,
@@ -169,6 +189,8 @@ def main(
         # options for custom bundle
         bundle.disable_precompilation = no_precompile
         bundle.threads = threads
+        bundle.ram = ram
+        bundle.compression_level = compression_level
 
         unsupported_platforms = list(
             filter(

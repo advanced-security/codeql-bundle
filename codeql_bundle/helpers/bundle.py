@@ -25,6 +25,8 @@ from codeql_bundle.cache import (
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_COMPRESSION_LEVEL = 6
+
 
 @verify(UNIQUE)
 class CodeQLPackKind(Enum):
@@ -226,6 +228,7 @@ class Bundle:
     def __init__(self, bundle_path: Path) -> None:
         self.tmp_dir = TemporaryDirectory()
         self.disable_precompilation = False
+        self.compression_level = DEFAULT_COMPRESSION_LEVEL
 
         if bundle_path.is_dir():
             self.bundle_path = Path(self.tmp_dir.name) / bundle_path.name
@@ -336,6 +339,14 @@ class Bundle:
     @threads.setter
     def threads(self, value: int):
         self.codeql.threads= value
+
+    @property
+    def ram(self):
+        return self.codeql.ram
+
+    @ram.setter
+    def ram(self, value: int):
+        self.codeql.ram = value
 
 class CustomBundle(Bundle):
     def __init__(
@@ -510,7 +521,9 @@ class CustomBundle(Bundle):
                 disable_precompilation=self.disable_precompilation,
             )
 
-        def copy_pack(pack: ResolvedCodeQLPack) -> ResolvedCodeQLPack:
+        def copy_pack(
+            pack: ResolvedCodeQLPack, exclude_generated: bool = False
+        ) -> ResolvedCodeQLPack:
             pack_copy_dir = (
                 Path(self.tmp_dir.name)
                 / "temp"  # Add a temp path segment because the standard library packs have scope 'codeql' that collides with the 'codeql' directory in the bundle that is extracted to the temporary directory.
@@ -522,10 +535,12 @@ class CustomBundle(Bundle):
             logging.debug(
                 f"Copying {pack.path.parent} to {pack_copy_dir} for modification"
             )
-            shutil.copytree(
-                pack.path.parent,
-                pack_copy_dir,
+            ignore = (
+                shutil.ignore_patterns(".codeql", ".cache", "*.qlx")
+                if exclude_generated
+                else None
             )
+            shutil.copytree(pack.path.parent, pack_copy_dir, ignore=ignore)
             pack_copy_path = pack_copy_dir / pack.path.name
             return dataclasses.replace(pack, path=pack_copy_path)
 
@@ -650,18 +665,18 @@ class CustomBundle(Bundle):
         def bundle_query_pack(pack: ResolvedCodeQLPack):
             if pack.config.get_scope() == "codeql":
                 logging.info(f"Bundling the standard query pack {pack.config.name}.")
-                pack_copy = copy_pack(pack)
+                pack_copy = copy_pack(pack, exclude_generated=True)
 
                 # Remove the lock file
                 logging.debug(
                     f"Removing CodeQL pack lock file {pack_copy.get_lock_file_path()}"
                 )
-                pack_copy.get_lock_file_path().unlink()
+                pack_copy.get_lock_file_path().unlink(missing_ok=True)
                 # Remove the included dependencies
                 logging.debug(
                     f"Removing CodeQL query pack dependencies directory {pack_copy.get_dependencies_path()}"
                 )
-                shutil.rmtree(pack_copy.get_dependencies_path())
+                shutil.rmtree(pack_copy.get_dependencies_path(), ignore_errors=True)
                 # Remove the query cache, if it exists.
                 logging.debug(
                     f"Removing CodeQL query pack cache directory {pack_copy.get_cache_path()}, if it exists."
@@ -886,7 +901,11 @@ class CustomBundle(Bundle):
                 output_path = output_path / "codeql-bundle.tar.gz"
 
             logging.debug(f"Bundling custom bundle to {output_path}.")
-            with tarfile.open(output_path, mode="w:gz") as bundle_archive:
+            with tarfile.open(
+                output_path,
+                mode="w:gz",
+                compresslevel=self.compression_level,
+            ) as bundle_archive:
                 bundle_archive.add(self.bundle_path, arcname="codeql")
         else:
             if not output_path.is_dir():
@@ -945,30 +964,29 @@ class CustomBundle(Bundle):
                             for candidate in candidates
                         ]
 
+                    exclusion_paths = get_nonplatform_tool_paths(platform)
+
+                    # Manual exclusions based on diffing the contents of the platform specific bundles and the generated platform specific bundles.
+                    if platform != BundlePlatform.WINDOWS:
+                        exclusion_paths.append(Path("codeql.exe"))
+                    else:
+                        exclusion_paths.append(Path("swift/qltest"))
+                        exclusion_paths.append(Path("swift/resource-dir"))
+
+                    if platform == BundlePlatform.LINUX:
+                        exclusion_paths.append(Path("swift/qltest/osx64"))
+                        exclusion_paths.append(Path("swift/resource-dir/osx64"))
+
+                    if platform == BundlePlatform.OSX:
+                        exclusion_paths.append(Path("swift/qltest/linux64"))
+                        exclusion_paths.append(Path("swift/resource-dir/linux64"))
+
+                    exclusion_paths = [
+                        Path("codeql") / path for path in exclusion_paths
+                    ]
+
                     def filter(tarinfo: tarfile.TarInfo) -> Optional[tarfile.TarInfo]:
                         tarfile_path = Path(tarinfo.name)
-
-                        exclusion_paths = get_nonplatform_tool_paths(platform)
-
-                        # Manual exclusions based on diffing the contents of the platform specific bundles and the generated platform specific bundles.
-                        if platform != BundlePlatform.WINDOWS:
-                            exclusion_paths.append(Path("codeql.exe"))
-                        else:
-                            exclusion_paths.append(Path("swift/qltest"))
-                            exclusion_paths.append(Path("swift/resource-dir"))
-
-                        if platform == BundlePlatform.LINUX:
-                            exclusion_paths.append(Path("swift/qltest/osx64"))
-                            exclusion_paths.append(Path("swift/resource-dir/osx64"))
-
-                        if platform == BundlePlatform.OSX:
-                            exclusion_paths.append(Path("swift/qltest/linux64"))
-                            exclusion_paths.append(Path("swift/resource-dir/linux64"))
-
-                        tarfile_path_root = Path(tarfile_path.parts[0])
-                        exclusion_paths = [
-                            tarfile_path_root / path for path in exclusion_paths
-                        ]
 
                         if any(
                             tarfile_path.is_relative_to(path)
@@ -983,15 +1001,20 @@ class CustomBundle(Bundle):
                 logging.debug(
                     f"Bundling custom bundle for {platform} to {bundle_output_path}."
                 )
-                with tarfile.open(bundle_output_path, mode="w:gz") as bundle_archive:
+                with tarfile.open(
+                    bundle_output_path,
+                    mode="w:gz",
+                    compresslevel=self.compression_level,
+                ) as bundle_archive:
                     bundle_archive.add(
                         self.bundle_path,
                         arcname="codeql",
                         filter=filter_for_platform(platform),
                     )
 
+            archive_workers = min(len(platforms), os.cpu_count() or 1)
             with concurrent.futures.ThreadPoolExecutor(
-                max_workers=len(platforms)
+                max_workers=archive_workers
             ) as executor:
                 future_to_platform = {
                     executor.submit(
