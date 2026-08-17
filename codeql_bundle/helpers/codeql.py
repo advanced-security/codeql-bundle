@@ -6,6 +6,7 @@ from typing import Dict, Any, Iterable, Self, Optional, List
 import yaml
 from dataclasses import dataclass, fields, field
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,7 @@ class CodeQL:
     def __init__(self, codeql_path: Path):
         self.codeql_path = codeql_path
         self._version = None
+        self._threads = None
         self._ram = None
 
     @property
@@ -73,6 +75,14 @@ class CodeQL:
     @disable_precompilation.setter
     def disable_precompilation(self, value: bool):
         self._disable_precompilation = value
+
+    @property
+    def threads(self):
+        return self._threads
+
+    @threads.setter
+    def threads(self, value: int):
+        self._threads = value
 
     @property
     def ram(self):
@@ -90,6 +100,37 @@ class CodeQL:
             [f"{self.codeql_path}", command] + [arg for arg in args],
             capture_output=True,
             text=True
+        )
+
+    def _exec_streaming(
+        self, command: str, *args: str
+    ) -> subprocess.CompletedProcess[str]:
+        command_args = [f"{self.codeql_path}", command, *args]
+        logger.debug(
+            f"Running CodeQL command: {command} with arguments: {' '.join(args)}"
+        )
+        try:
+            process = subprocess.Popen(
+                command_args,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+        except OSError as error:
+            raise CodeQLException(
+                f"Failed to run {command_args}: {error}"
+            ) from error
+        output = []
+        if process.stdout is None:
+            raise CodeQLException(f"Failed to capture output from {command_args}!")
+        for line in process.stdout:
+            output.append(line)
+            logger.info(line.rstrip())
+        return subprocess.CompletedProcess(
+            command_args,
+            process.wait(),
+            stdout="",
+            stderr="".join(output),
         )
 
     def version(self) -> Version:
@@ -141,8 +182,8 @@ class CodeQL:
         pack: CodeQLPack,
         output_path: Path,
         *additional_packs: Path,
-        disable_precompilation = False
-    ):
+        disable_precompilation: bool = False,
+    ) -> None:
         if not pack.config.library:
             raise CodeQLException(f"Cannot bundle non-library pack {pack.config.name}!")
 
@@ -154,7 +195,9 @@ class CodeQL:
              )
 
         if len(additional_packs) > 0:
-            args.append(f"--additional-packs={':'.join(map(str,additional_packs))}")
+            args.append(
+                f"--additional-packs={os.pathsep.join(map(str, additional_packs))}"
+            )
 
         if self.ram is not None:
             logging.info(f"Using {self.ram} MB of RAM for bundling {pack.config.name}.")
@@ -175,12 +218,20 @@ class CodeQL:
         pack: CodeQLPack,
         output_path: Path,
         *additional_packs: Path,
-        disable_precompilation = False
-    ):
+        disable_precompilation: bool = False,
+        compilation_caches: Iterable[Path] = (),
+    ) -> None:
         if pack.config.library:
             raise CodeQLException(f"Cannot bundle non-query pack {pack.config.name}!")
 
-        args = ["create", "--format=json", f"--output={output_path}", "--threads=0", "--no-default-compilation-cache"]
+        args = ["create", "--format=json", f"--output={output_path}", "--no-default-compilation-cache"]
+
+        if self.threads is not None:
+            logging.info(f"Using {self.threads} threads for bundling {pack.config.name}.")
+            args.append(f"--threads={self.threads}")
+        else:
+            args.append(f"--threads=0")
+
         if disable_precompilation:
             args.append("--no-precompile")
             logging.warn(
@@ -189,11 +240,16 @@ class CodeQL:
 
         if self.supports_qlx():
             args.append("--qlx")
+        for compilation_cache in compilation_caches:
+            args.append(f"--compilation-cache={compilation_cache}")
         if len(additional_packs) > 0:
-            args.append(f"--additional-packs={':'.join(map(str,additional_packs))}")
+            args.append(
+                f"--additional-packs={os.pathsep.join(map(str, additional_packs))}"
+            )
         if self.ram is not None:
             logging.info(f"Using {self.ram} MB of RAM for packing {pack.config.name}.")
             args.append(f"--ram={self.ram}")
+
         cp = self._exec(
             "pack",
             *args,
@@ -203,7 +259,37 @@ class CodeQL:
 
         if cp.returncode != 0:
             raise CodeQLException(f"Failed to run {cp.args} command! {cp.stderr}")
-        
+
+    def query_compile(
+        self,
+        queries: Iterable[Path],
+        compilation_cache: Path,
+        *additional_packs: Path,
+        threads: int = 0,
+        ram: Optional[int] = None,
+        compilation_cache_size: Optional[int] = None,
+    ) -> subprocess.CompletedProcess[str]:
+        args = [
+            "compile",
+            "--keep-going",
+            f"--threads={threads}",
+            "--no-default-compilation-cache",
+            f"--compilation-cache={compilation_cache}",
+            "--verbosity=progress+++",
+        ]
+        if ram is not None:
+            args.append(f"--ram={ram}")
+        if compilation_cache_size is not None:
+            args.append(f"--compilation-cache-size={compilation_cache_size}")
+        if additional_packs:
+            args.append(
+                f"--additional-packs={os.pathsep.join(map(str, additional_packs))}"
+            )
+        cp = self._exec_streaming("query", *args, "--", *map(str, queries))
+        if cp.returncode != 0:
+            raise CodeQLException(f"Failed to run {cp.args} command! {cp.stderr}")
+        return cp
+
     def resolve_languages(self) -> set[str]:
         cp = self._exec("resolve", "languages", "--format=json")
         if cp.returncode == 0:

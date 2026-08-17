@@ -18,6 +18,17 @@ Please note that this project is released with a [Contributor Code of Conduct][c
 3. Push to your fork and [submit a pull request][pr].
 4. Ensure the required checks pass.
 
+Run the local unit tests with:
+
+```bash
+python -m unittest discover -s tests -p "test_*.py" -v
+```
+
+Cache release development does not require GitHub Actions. The
+`codeql-bundle-cache` commands documented in the README perform release
+inspection, cache construction, cache-hit verification, and catalog generation
+locally. The workflow should remain a thin wrapper around those commands.
+
 Here are a few things you can do that will increase the likelihood of your pull request being accepted:
 
 - Write tests.

@@ -1,0 +1,376 @@
+name: Build CodeQL compilation caches
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/codeql-compilation-caches.yml"
+      - "codeql_bundle/cache.py"
+      - "codeql_bundle/cache_cli.py"
+      - "codeql_bundle/helpers/**"
+      - "codeql_bundle/supported-codeql-bundles*"
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      bundle_version:
+        description: CodeQL bundle tag or version to build
+        required: false
+        type: string
+      force:
+        description: Rebuild even if a catalog entry or update pull request exists
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: codeql-compilation-cache-${{ inputs.bundle_version || 'latest' }}
+  cancel-in-progress: false
+
+env:
+  CODEQL_BUNDLE_CACHE_DIR: ${{ github.workspace }}/.codeql-bundle-cache
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      cache_release: ${{ steps.version.outputs.cache_release }}
+      catalog_branch: ${{ steps.version.outputs.catalog_branch }}
+      matrix: ${{ steps.plan.outputs.matrix || '[{"language":"skip","target":"skip"}]' }}
+      release: ${{ steps.version.outputs.release }}
+      skip: ${{ steps.existing.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: python -m pip install .
+
+      - id: version
+        name: Select upstream release
+        env:
+          REQUESTED_BUNDLE_VERSION: ${{ inputs.bundle_version }}
+          FORCE_REBUILD: ${{ inputs.force || false }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          release="$REQUESTED_BUNDLE_VERSION"
+          if [[ -z "$release" ]]; then
+            release="$(codeql-bundle-cache latest-release)"
+          elif [[ "$release" != codeql-bundle-* ]]; then
+            release="codeql-bundle-v${release#v}"
+          fi
+          if [[ ! "$release" =~ ^codeql-bundle-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid CodeQL bundle release: $release" >&2
+            exit 1
+          fi
+          base_cache_release="codeql-compilation-cache-${release#codeql-bundle-}"
+          cache_release="$base_cache_release"
+          catalog_branch="automation/$base_cache_release"
+          if [[ "$FORCE_REBUILD" == "true" ]] ||
+             gh release view "$base_cache_release" >/dev/null 2>&1; then
+            cache_release="${base_cache_release}-r${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          fi
+          if [[ "$FORCE_REBUILD" == "true" ]]; then
+            catalog_branch="automation/$cache_release"
+          fi
+          echo "cache_release=$cache_release" >> "$GITHUB_OUTPUT"
+          echo "catalog_branch=$catalog_branch" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
+      - id: existing
+        name: Check authoritative catalog
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE_REBUILD: ${{ inputs.force || false }}
+        shell: bash
+        run: |
+          present="$(codeql-bundle-cache catalog-has \
+            --catalog codeql_bundle/supported-codeql-bundles.json \
+            --release "${{ steps.version.outputs.release }}")"
+          open_prs="$(gh pr list \
+            --state open \
+            --head "${{ steps.version.outputs.catalog_branch }}" \
+            --json number \
+            --jq length)"
+          if [[ "$FORCE_REBUILD" != "true" && "$present" == "true" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "The catalog already contains ${{ steps.version.outputs.release }}."
+          elif [[ "$FORCE_REBUILD" != "true" && "$open_prs" != "0" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "A catalog update pull request is already open for ${{ steps.version.outputs.release }}."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.existing.outputs.skip != 'true'
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CODEQL_BUNDLE_CACHE_DIR }}/sources/${{ steps.version.outputs.release }}
+          key: codeql-source-${{ steps.version.outputs.release }}-${{ runner.os }}
+
+      - if: steps.existing.outputs.skip != 'true'
+        id: plan
+        name: Create release plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          codeql-bundle-cache plan-release \
+            --release "${{ steps.version.outputs.release }}" \
+            --cache-release "${{ steps.version.outputs.cache_release }}" \
+            --output release-plan.json
+          echo "cache_release=$(jq -r '.cache_release' release-plan.json)" >> "$GITHUB_OUTPUT"
+          echo "matrix=$(jq -c '.targets' release-plan.json)" >> "$GITHUB_OUTPUT"
+
+      - if: steps.existing.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-plan
+          path: release-plan.json
+          if-no-files-found: error
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cache: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: python -m pip install .
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-plan
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.CODEQL_BUNDLE_CACHE_DIR }}/sources/${{ needs.plan.outputs.release }}
+          key: codeql-source-${{ needs.plan.outputs.release }}-${{ runner.os }}
+
+      - name: Build and verify cache
+        run: |
+          codeql-bundle-cache build \
+            --plan release-plan.json \
+            --target "${{ matrix.cache.target }}" \
+            --output-dir dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cache-${{ matrix.cache.language }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+            dist/*.metadata.json
+          if-no-files-found: error
+          compression-level: 0
+
+  verify:
+    needs:
+      - plan
+      - build
+    if: needs.plan.outputs.skip != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: python -m pip install .
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-plan
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cache-*
+          path: dist
+          merge-multiple: true
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.CODEQL_BUNDLE_CACHE_DIR }}/sources/${{ needs.plan.outputs.release }}
+          key: codeql-source-${{ needs.plan.outputs.release }}-${{ runner.os }}
+
+      - name: Verify all caches
+        run: codeql-bundle-cache verify-all --plan release-plan.json --assets-dir dist
+
+  publish:
+    needs:
+      - plan
+      - build
+      - verify
+    if: needs.plan.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: publish-codeql-compilation-cache-${{ needs.plan.outputs.release }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: python -m pip install .
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-plan
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cache-*
+          path: dist
+          merge-multiple: true
+
+      - id: recheck
+        name: Recheck catalog update pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE_REBUILD: ${{ inputs.force || false }}
+        shell: bash
+        run: |
+          branch="${{ needs.plan.outputs.catalog_branch }}"
+          git fetch --quiet origin main
+          git show \
+            origin/main:codeql_bundle/supported-codeql-bundles.json \
+            > "${{ runner.temp }}/current-catalog.json"
+          present="$(codeql-bundle-cache catalog-has \
+            --catalog "${{ runner.temp }}/current-catalog.json" \
+            --release "${{ needs.plan.outputs.release }}")"
+          open_prs="$(gh pr list \
+            --state open \
+            --head "$branch" \
+            --json number \
+            --jq length)"
+          if [[ "$FORCE_REBUILD" != "true" && "$present" == "true" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "The catalog was updated by another run."
+          elif [[ "$FORCE_REBUILD" != "true" && "$open_prs" != "0" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "A catalog update pull request was opened by another run."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish cache release
+        if: steps.recheck.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          mapfile -t assets < <(find dist -maxdepth 1 -type f | sort)
+          gh release create "${{ needs.plan.outputs.cache_release }}" \
+            "${assets[@]}" \
+            --latest=false \
+            --title "Compilation caches for ${{ needs.plan.outputs.release }}" \
+            --notes "Validated CodeQL compilation caches generated from ${{ needs.plan.outputs.release }}."
+
+      - name: Create candidate catalog entry
+        if: steps.recheck.outputs.skip != 'true'
+        run: |
+          codeql-bundle-cache catalog-entry \
+            --plan release-plan.json \
+            --assets-dir dist \
+            --validated-platform linux64 \
+            --validated-platform osx64 \
+            --validated-platform win64 \
+            --output catalog-entry.json
+          codeql-bundle-cache verify-entry \
+            --entry catalog-entry.json \
+            --cache-dir "${{ runner.temp }}/published-cache"
+          codeql-bundle-cache update-catalog \
+            --catalog codeql_bundle/supported-codeql-bundles.json \
+            --entry catalog-entry.json
+
+      - name: Test automatic cache use with a customization
+        if: steps.recheck.outputs.skip != 'true'
+        shell: bash
+        run: |
+          mkdir -p "${{ runner.temp }}/custom-bundles"
+          codeql-bundle \
+            --bundle "${{ needs.plan.outputs.release }}" \
+            --cache-manifest codeql_bundle/supported-codeql-bundles.json \
+            --cache-dir "${{ runner.temp }}/consumer-cache" \
+            --output "${{ runner.temp }}/custom-bundles" \
+            --workspace tests/workspace \
+            --platform linux64 \
+            foo/cpp-customizations
+          mkdir -p "${{ runner.temp }}/custom-codeql"
+          tar -xzf \
+            "${{ runner.temp }}/custom-bundles/codeql-bundle-linux64.tar.gz" \
+            -C "${{ runner.temp }}/custom-codeql"
+          cp -R tests/workspace "${{ runner.temp }}/test-workspace"
+          rm -rf "${{ runner.temp }}/test-workspace/cpp/foo-customizations"
+          find "${{ runner.temp }}/test-workspace" \
+            -name codeql-pack.lock.yml \
+            -delete
+          "${{ runner.temp }}/custom-codeql/codeql/codeql" test run \
+            --additional-packs="${{ runner.temp }}/custom-codeql/codeql:${{ runner.temp }}/test-workspace" \
+            "${{ runner.temp }}/test-workspace/cpp/foo-bundle-customizations-tests"
+
+      - name: Open catalog update pull request
+        if: steps.recheck.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          branch="${{ needs.plan.outputs.catalog_branch }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add codeql_bundle/supported-codeql-bundles.json
+          git commit -m "Add compilation caches for ${{ needs.plan.outputs.release }}"
+          git push --force origin "HEAD:refs/heads/$branch"
+          open_prs="$(gh pr list \
+            --state open \
+            --head "$branch" \
+            --json number \
+            --jq length)"
+          if [[ "$open_prs" == "0" ]]; then
+            gh pr create \
+              --base main \
+              --head "$branch" \
+              --title "Add compilation caches for ${{ needs.plan.outputs.release }}" \
+              --body "Publishes the validated per-language compilation caches for \`${{ needs.plan.outputs.release }}\`."
+          fi
+
+      - name: Trigger catalog pull request tests
+        if: steps.recheck.outputs.skip != 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run test.yml \
+            --ref "${{ needs.plan.outputs.catalog_branch }}"

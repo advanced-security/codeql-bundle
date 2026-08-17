@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/advanced-security/codeql-bundle/main/codeql_bundle/supported-codeql-bundles.schema.json",
+  "title": "Supported CodeQL bundles",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "bundles"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "bundles": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/bundle"
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "url",
+        "sha256",
+        "size"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "sourceAsset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "url",
+        "sha256",
+        "size",
+        "platform"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "platform": {
+          "enum": [
+            "all",
+            "linux64",
+            "osx64",
+            "win64"
+          ]
+        }
+      }
+    },
+    "cache": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "language",
+        "query_packs",
+        "asset"
+      ],
+      "properties": {
+        "language": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "query_packs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "asset": {
+          "$ref": "#/$defs/asset"
+        }
+      }
+    },
+    "bundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "release",
+        "cli_version",
+        "source_repository",
+        "pack_fingerprint",
+        "source_assets",
+        "cache_release",
+        "cache_format",
+        "compilation_caches",
+        "validated_platforms"
+      ],
+      "properties": {
+        "release": {
+          "type": "string",
+          "pattern": "^codeql-bundle-v[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "cli_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_repository": {
+          "type": "string",
+          "pattern": "^[^/]+/[^/]+$"
+        },
+        "pack_fingerprint": {
+          "$ref": "#/$defs/sha256"
+        },
+        "source_assets": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/sourceAsset"
+          }
+        },
+        "cache_release": {
+          "type": "string",
+          "pattern": "^codeql-compilation-cache-v[0-9]+\\.[0-9]+\\.[0-9]+(?:-[A-Za-z0-9._-]+)?$"
+        },
+        "cache_format": {
+          "const": 1
+        },
+        "compilation_caches": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/cache"
+          }
+        },
+        "validated_platforms": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "linux64",
+              "osx64",
+              "win64"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

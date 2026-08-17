@@ -11,6 +11,14 @@ import click
 from pathlib import Path
 from codeql_bundle.helpers.codeql import CodeQLException
 from codeql_bundle.helpers.bundle import CustomBundle, BundleException, BundlePlatform
+from codeql_bundle.cache import (
+    BundleCatalog,
+    BundleSourceResolver,
+    CacheException,
+    CatalogLoader,
+    CompilationCacheManager,
+    default_cache_dir,
+)
 from typing import List, Optional
 import sys
 import logging
@@ -24,8 +32,8 @@ logger = logging.getLogger(__name__)
     "--bundle",
     "bundle_path",
     required=True,
-    help="Path to a CodeQL bundle downloaded from https://github.com/github/codeql-action/releases",
-    type=click.Path(exists=True, path_type=Path),
+    help="Path, URL, or github/codeql-action release tag for the source CodeQL bundle",
+    type=click.STRING,
 )
 @click.option(
     "-o",
@@ -73,6 +81,30 @@ logger = logging.getLogger(__name__)
     help="Path to a JSON file specifying additional data to install into the bundle",
 )
 @click.option(
+    "-j",
+    "--threads",
+    type=click.INT,
+    help="Use this many threads to compile queries.",
+)
+@click.option(
+    "--cache-dir",
+    type=click.Path(path_type=Path),
+    default=default_cache_dir,
+    show_default=True,
+    help="Directory used for downloaded bundles and compilation caches.",
+)
+@click.option(
+    "--cache-manifest",
+    type=click.STRING,
+    help="Path or URL of a supported bundle manifest.",
+)
+@click.option(
+    "--no-compilation-cache",
+    is_flag=True,
+    help="Do not resolve, download, or use published compilation caches.",
+)
+
+@click.option(
     "-M",
     "--ram",
     type=click.INT,
@@ -80,7 +112,7 @@ logger = logging.getLogger(__name__)
 )
 @click.argument("packs", nargs=-1, required=True)
 def main(
-    bundle_path: Path,
+    bundle_path: str,
     output: Path,
     workspace: Path,
     no_precompile: bool,
@@ -88,6 +120,10 @@ def main(
     platform: List[str],
     code_scanning_config: Optional[Path],
     additional_data_config: Optional[Path],
+    threads: Optional[int],
+    cache_dir: Path,
+    cache_manifest: Optional[str],
+    no_compilation_cache: bool,
     ram: Optional[int],
     packs: List[str],
 ) -> None:
@@ -104,18 +140,42 @@ def main(
         )
 
     workspace = Path(os.path.abspath(workspace))
+    cache_dir = Path(os.path.abspath(cache_dir))
 
     if workspace.name == "codeql-workspace.yml":
         workspace = workspace.parent
 
-    logger.info(
-        f"Creating custom bundle of {bundle_path} using CodeQL pack(s) in workspace {workspace}"
-    )
-
     try:
-        bundle = CustomBundle(bundle_path, workspace)
+        use_compilation_cache = not no_compilation_cache and not no_precompile
+        catalog = (
+            CatalogLoader(cache_dir).load(cache_manifest)
+            if use_compilation_cache
+            else BundleCatalog.empty()
+        )
+        source = BundleSourceResolver(catalog, cache_dir).resolve(
+            bundle_path, platform
+        )
+        logger.info(
+            f"Creating custom bundle of {source.path} using CodeQL pack(s) in workspace {workspace}"
+        )
+        bundle = CustomBundle(source.path, workspace)
+        supported_bundle = source.supported_bundle
+        if (
+            use_compilation_cache
+            and supported_bundle is None
+            and source.path.is_dir()
+        ):
+            supported_bundle = catalog.find_fingerprint(
+                str(bundle.codeql.version()), bundle.pack_fingerprint()
+            )
+        bundle.compilation_cache_manager = CompilationCacheManager(
+            supported_bundle,
+            cache_dir,
+            enabled=use_compilation_cache,
+        )
         # options for custom bundle
         bundle.disable_precompilation = no_precompile
+        bundle.threads = threads
         bundle.ram = ram
 
         unsupported_platforms = list(
@@ -179,6 +239,9 @@ def main(
         sys.exit(1)
     except BundleException as e:
         logger.fatal(f"Failed to build custom bundle with reason: '{e}'")
+        sys.exit(1)
+    except CacheException as e:
+        logger.fatal(f"Failed to resolve bundle cache with reason: '{e}'")
         sys.exit(1)
 
 
