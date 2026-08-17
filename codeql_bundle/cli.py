@@ -104,6 +104,12 @@ logger = logging.getLogger(__name__)
     help="Do not resolve, download, or use published compilation caches.",
 )
 
+@click.option(
+    "-M",
+    "--ram",
+    type=click.INT,
+    help="Set total amount of RAM that the compiler should be allowed to use.",
+)
 @click.argument("packs", nargs=-1, required=True)
 def main(
     bundle_path: str,
@@ -118,6 +124,7 @@ def main(
     cache_dir: Path,
     cache_manifest: Optional[str],
     no_compilation_cache: bool,
+    ram: Optional[int],
     packs: List[str],
 ) -> None:
 
@@ -169,6 +176,7 @@ def main(
         # options for custom bundle
         bundle.disable_precompilation = no_precompile
         bundle.threads = threads
+        bundle.ram = ram
 
         unsupported_platforms = list(
             filter(

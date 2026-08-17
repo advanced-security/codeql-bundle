@@ -337,6 +337,16 @@ class Bundle:
     def threads(self, value: int):
         self.codeql.threads= value
 
+    @property
+    def ram(self):
+        return self.codeql.ram
+
+    @ram.setter
+    def ram(self, value: int):
+        self.codeql.ram = value
+
+
+
 class CustomBundle(Bundle):
     def __init__(
         self,

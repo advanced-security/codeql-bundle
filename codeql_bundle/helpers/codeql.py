@@ -66,6 +66,7 @@ class CodeQL:
         self.codeql_path = codeql_path
         self._version = None
         self._threads = None
+        self._ram = None
 
     @property
     def disable_precompilation(self):
@@ -74,7 +75,7 @@ class CodeQL:
     @disable_precompilation.setter
     def disable_precompilation(self, value: bool):
         self._disable_precompilation = value
-    
+
     @property
     def threads(self):
         return self._threads
@@ -82,6 +83,14 @@ class CodeQL:
     @threads.setter
     def threads(self, value: int):
         self._threads = value
+
+    @property
+    def ram(self):
+        return self._ram
+
+    @ram.setter
+    def ram(self, value: int):
+        self._ram = value
 
     def _exec(self, command: str, *args: str) -> subprocess.CompletedProcess[str]:
         logger.debug(
@@ -125,7 +134,7 @@ class CodeQL:
         )
 
     def version(self) -> Version:
-        if self._version != None:
+        if self._version is not None:
             return self._version
         else:
             cp = self._exec("version", "--format=json")
@@ -178,7 +187,7 @@ class CodeQL:
         if not pack.config.library:
             raise CodeQLException(f"Cannot bundle non-library pack {pack.config.name}!")
 
-        args = ["bundle", "--format=json", f"--pack-path={output_path}"]
+        args = ["bundle", "--format=json", f"--pack-path={output_path}", "--threads=0"]
         if disable_precompilation:
             args.append("--no-precompile")
             logging.warn(
@@ -189,6 +198,11 @@ class CodeQL:
             args.append(
                 f"--additional-packs={os.pathsep.join(map(str, additional_packs))}"
             )
+
+        if self.ram is not None:
+            logging.info(f"Using {self.ram} MB of RAM for bundling {pack.config.name}.")
+            args.append(f"--ram={self.ram}")
+
         cp = self._exec(
             "pack",
             *args,
@@ -217,7 +231,7 @@ class CodeQL:
             args.append(f"--threads={self.threads}")
         else:
             args.append(f"--threads=0")
-            
+
         if disable_precompilation:
             args.append("--no-precompile")
             logging.warn(
@@ -232,6 +246,10 @@ class CodeQL:
             args.append(
                 f"--additional-packs={os.pathsep.join(map(str, additional_packs))}"
             )
+        if self.ram is not None:
+            logging.info(f"Using {self.ram} MB of RAM for packing {pack.config.name}.")
+            args.append(f"--ram={self.ram}")
+
         cp = self._exec(
             "pack",
             *args,
@@ -271,7 +289,7 @@ class CodeQL:
         if cp.returncode != 0:
             raise CodeQLException(f"Failed to run {cp.args} command! {cp.stderr}")
         return cp
-        
+
     def resolve_languages(self) -> set[str]:
         cp = self._exec("resolve", "languages", "--format=json")
         if cp.returncode == 0:
