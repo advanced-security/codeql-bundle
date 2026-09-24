@@ -233,12 +233,46 @@ class ArtifactTests(unittest.TestCase):
             for platform in ("linux64", "osx64", "win64")
             if platform != current
         )
-        self.assertEqual("all", source_platform_for_request(()))
+        expected_default = "linux-arm64" if current == "linux-arm64" else "all"
+        self.assertEqual(expected_default, source_platform_for_request(()))
         self.assertEqual(current, source_platform_for_request((current,)))
-        self.assertEqual("all", source_platform_for_request((other,)))
-        self.assertEqual(
-            "all", source_platform_for_request(("linux64", "win64"))
-        )
+        if current == "linux-arm64":
+            with self.assertRaises(CacheException):
+                source_platform_for_request((other,))
+            with self.assertRaises(CacheException):
+                source_platform_for_request(("linux-arm64", "win64"))
+        else:
+            self.assertEqual("all", source_platform_for_request((other,)))
+            self.assertEqual(
+                "all", source_platform_for_request(("linux64", "win64"))
+            )
+            with self.assertRaises(CacheException):
+                source_platform_for_request(("linux-arm64",))
+
+    def test_current_bundle_platform_distinguishes_linux_architecture(self) -> None:
+        with patch("codeql_bundle.cache.platform.system", return_value="Linux"):
+            with patch(
+                "codeql_bundle.cache.platform.machine", return_value="x86_64"
+            ):
+                self.assertEqual("linux64", current_bundle_platform())
+            with patch(
+                "codeql_bundle.cache.platform.machine", return_value="aarch64"
+            ):
+                self.assertEqual("linux-arm64", current_bundle_platform())
+                self.assertEqual(
+                    "linux-arm64", source_platform_for_request(())
+                )
+                self.assertEqual(
+                    "linux-arm64",
+                    source_platform_for_request(("linux-arm64",)),
+                )
+                with self.assertRaises(CacheException):
+                    source_platform_for_request(("linux64",))
+            with patch(
+                "codeql_bundle.cache.platform.machine", return_value="riscv64"
+            ):
+                with self.assertRaises(CacheException):
+                    current_bundle_platform()
 
     def test_local_archive_matches_catalog_digest(self) -> None:
         with TemporaryDirectory() as directory:
@@ -351,6 +385,57 @@ class ArtifactTests(unittest.TestCase):
                 )
 
             self.assertEqual(sha256_file(archive), resolved.digest)
+
+    def test_linux_arm64_does_not_fall_back_to_all_platform_source(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            served = root / "served"
+            served.mkdir()
+            arm_archive = served / "codeql-bundle-linux-arm64.tar.gz"
+            arm_archive.write_bytes(b"arm64")
+            all_source = SourceAsset(
+                name="codeql-bundle.tar.gz",
+                url="https://example.test/codeql-bundle.tar.gz",
+                sha256="1" * 64,
+                size=100,
+                platform="all",
+            )
+            cache = ReleaseAsset(
+                name="cache.tar.gz",
+                url="https://example.test/cache.tar.gz",
+                sha256="2" * 64,
+                size=10,
+            )
+            with serve(served) as base_url:
+                release = {
+                    "tag_name": "codeql-bundle-v1.2.3",
+                    "assets": [
+                        {
+                            "browser_download_url": f"{base_url}/{arm_archive.name}",
+                            "digest": f"sha256:{sha256_file(arm_archive)}",
+                            "name": arm_archive.name,
+                            "size": arm_archive.stat().st_size,
+                        }
+                    ],
+                }
+
+                class ReleaseClient(GitHubReleaseClient):
+                    def release(self, tag: str) -> dict[str, object]:
+                        return release
+
+                with patch(
+                    "codeql_bundle.cache.current_bundle_platform",
+                    return_value="linux-arm64",
+                ):
+                    resolved = BundleSourceResolver(
+                        BundleCatalog([bundle_with_assets(all_source, cache)]),
+                        root / "downloads",
+                        release_client=ReleaseClient(),
+                    ).resolve("codeql-bundle-v1.2.3", ["linux-arm64"])
+
+            self.assertEqual(arm_archive.name, resolved.path.name)
+            self.assertEqual(arm_archive.read_bytes(), resolved.path.read_bytes())
+            self.assertIsNone(resolved.supported_bundle)
 
     def test_safe_extract_rejects_parent_path(self) -> None:
         with TemporaryDirectory() as directory:

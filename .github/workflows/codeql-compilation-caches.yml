@@ -45,6 +45,7 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix || '[{"language":"skip","target":"skip"}]' }}
       release: ${{ steps.version.outputs.release }}
       skip: ${{ steps.existing.outputs.skip }}
+      verify_matrix: ${{ steps.plan.outputs.verify_matrix || '[{"platform":"skip","os":"ubuntu-latest"}]' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -115,7 +116,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.CODEQL_BUNDLE_CACHE_DIR }}/sources/${{ steps.version.outputs.release }}
-          key: codeql-source-${{ steps.version.outputs.release }}-${{ runner.os }}
+          key: codeql-source-${{ steps.version.outputs.release }}-${{ runner.os }}-${{ runner.arch }}
 
       - if: steps.existing.outputs.skip != 'true'
         id: plan
@@ -130,6 +131,22 @@ jobs:
             --output release-plan.json
           echo "cache_release=$(jq -r '.cache_release' release-plan.json)" >> "$GITHUB_OUTPUT"
           echo "matrix=$(jq -c '.targets' release-plan.json)" >> "$GITHUB_OUTPUT"
+          verify_matrix="$(jq -c '
+            [.source_assets[].platform |
+              select(. != "all") |
+              {
+                platform: .,
+                os: (
+                  if . == "linux64" then "ubuntu-latest"
+                  elif . == "linux-arm64" then "ubuntu-24.04-arm"
+                  elif . == "osx64" then "macos-latest"
+                  elif . == "win64" then "windows-latest"
+                  else error("Unsupported source platform: " + .)
+                  end
+                )
+              }
+            ]' release-plan.json)"
+          echo "verify_matrix=$verify_matrix" >> "$GITHUB_OUTPUT"
 
       - if: steps.existing.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
@@ -162,7 +179,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.CODEQL_BUNDLE_CACHE_DIR }}/sources/${{ needs.plan.outputs.release }}
-          key: codeql-source-${{ needs.plan.outputs.release }}-${{ runner.os }}
+          key: codeql-source-${{ needs.plan.outputs.release }}-${{ runner.os }}-${{ runner.arch }}
 
       - name: Build and verify cache
         run: |
@@ -189,10 +206,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
-          - windows-latest
+        include: ${{ fromJSON(needs.plan.outputs.verify_matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -216,7 +230,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.CODEQL_BUNDLE_CACHE_DIR }}/sources/${{ needs.plan.outputs.release }}
-          key: codeql-source-${{ needs.plan.outputs.release }}-${{ runner.os }}
+          key: codeql-source-${{ needs.plan.outputs.release }}-${{ runner.os }}-${{ runner.arch }}
 
       - name: Verify all caches
         run: codeql-bundle-cache verify-all --plan release-plan.json --assets-dir dist
@@ -299,13 +313,16 @@ jobs:
 
       - name: Create candidate catalog entry
         if: steps.recheck.outputs.skip != 'true'
+        shell: bash
         run: |
+          validated_platform_args=()
+          while IFS= read -r platform; do
+            validated_platform_args+=(--validated-platform "$platform")
+          done < <(jq -r '.source_assets[].platform | select(. != "all")' release-plan.json)
           codeql-bundle-cache catalog-entry \
             --plan release-plan.json \
             --assets-dir dist \
-            --validated-platform linux64 \
-            --validated-platform osx64 \
-            --validated-platform win64 \
+            "${validated_platform_args[@]}" \
             --output catalog-entry.json
           codeql-bundle-cache verify-entry \
             --entry catalog-entry.json \
