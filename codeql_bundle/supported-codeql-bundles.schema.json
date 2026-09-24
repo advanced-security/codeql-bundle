@@ -84,7 +84,6 @@
           "enum": [
             "all",
             "linux64",
-            "linux-arm64",
             "osx64",
             "win64"
           ]
@@ -178,7 +177,6 @@
           "items": {
             "enum": [
               "linux64",
-              "linux-arm64",
               "osx64",
               "win64"
             ]

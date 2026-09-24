@@ -12,13 +12,11 @@ from pathlib import Path
 from codeql_bundle.helpers.codeql import CodeQLException
 from codeql_bundle.helpers.bundle import CustomBundle, BundleException, BundlePlatform
 from codeql_bundle.cache import (
-    BUNDLE_PLATFORMS,
     BundleCatalog,
     BundleSourceResolver,
     CacheException,
     CatalogLoader,
     CompilationCacheManager,
-    current_bundle_platform,
     default_cache_dir,
 )
 from typing import List, Optional
@@ -67,7 +65,10 @@ logger = logging.getLogger(__name__)
     "-p",
     "--platform",
     multiple=True,
-    type=click.Choice(BUNDLE_PLATFORMS, case_sensitive=False),
+    type=click.Choice(
+        ["linux64", "linux-arm64", "osx64", "win64"],
+        case_sensitive=False,
+    ),
     help="Target platform for the bundle",
 )
 @click.option(
@@ -141,9 +142,6 @@ def main(
         workspace = workspace.parent
 
     try:
-        if not platform and current_bundle_platform() == "linux-arm64":
-            platform = ["linux-arm64"]
-
         use_compilation_cache = not no_compilation_cache and not no_precompile
         catalog = (
             CatalogLoader(cache_dir).load(cache_manifest)

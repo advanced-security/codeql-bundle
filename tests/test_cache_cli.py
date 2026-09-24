@@ -87,7 +87,6 @@ class CacheCliTests(unittest.TestCase):
                         [
                             ("all", "codeql-bundle.tar.gz"),
                             ("linux64", "codeql-bundle-linux64.tar.gz"),
-                            ("linux-arm64", "codeql-bundle-linux-arm64.tar.gz"),
                             ("osx64", "codeql-bundle-osx64.tar.gz"),
                             ("win64", "codeql-bundle-win64.tar.gz"),
                         ],

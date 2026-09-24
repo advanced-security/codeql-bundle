@@ -36,8 +36,6 @@ CODEQL_ACTION_REPOSITORY = "github/codeql-action"
 CACHE_FORMAT_VERSION = 1
 DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 CATALOG_REFRESH_SECONDS = 60 * 60
-BUNDLE_PLATFORMS = ("linux64", "linux-arm64", "osx64", "win64")
-SOURCE_PLATFORMS = ("all", *BUNDLE_PLATFORMS)
 RELEASE_PATTERN = re.compile(r"^codeql-bundle-v\d+\.\d+\.\d+$")
 CACHE_RELEASE_PATTERN = re.compile(
     r"^codeql-compilation-cache-v\d+\.\d+\.\d+(?:-[A-Za-z0-9._-]+)?$"
@@ -725,22 +723,30 @@ class BundleSourceResolver:
     ) -> ResolvedBundleSource:
         platform_name = source_platform_for_request(requested_platforms)
         validate_release(release)
-        bundle = self.catalog.find_release(release)
+        # ponytail: ARM64 has no compilation-cache catalog; fetch its release asset.
+        bundle = (
+            None
+            if platform_name == "linux-arm64"
+            else self.catalog.find_release(release)
+        )
         if bundle:
             asset = bundle.source_asset_for_platform(platform_name)
-            if asset is None and platform_name not in {"all", "linux-arm64"}:
+            if asset is None and platform_name != "all":
                 asset = bundle.source_asset_for_platform("all")
-            if asset is not None:
-                destination = cache_path(
-                    self.cache_dir, "sources", release, asset.name
+            if asset is None:
+                raise CatalogException(
+                    f"Bundle {release} has no source asset for {platform_name}."
                 )
-                digest = download_file(
-                    asset.url,
-                    destination,
-                    expected_sha256=asset.sha256,
-                    expected_size=asset.size,
-                )
-                return ResolvedBundleSource(destination, bundle, digest)
+            destination = cache_path(
+                self.cache_dir, "sources", release, asset.name
+            )
+            digest = download_file(
+                asset.url,
+                destination,
+                expected_sha256=asset.sha256,
+                expected_size=asset.size,
+            )
+            return ResolvedBundleSource(destination, bundle, digest)
 
         asset_name = source_asset_name(platform_name)
         release_value = self.release_client.release(release)
@@ -1013,7 +1019,7 @@ def write_json(path: Path, value: dict[str, Any]) -> None:
 def source_asset_name(platform_name: str) -> str:
     if platform_name == "all":
         return "codeql-bundle.tar.gz"
-    if platform_name not in BUNDLE_PLATFORMS:
+    if platform_name not in {"linux64", "linux-arm64", "osx64", "win64"}:
         raise CacheException(f"Unsupported bundle platform: {platform_name}")
     return f"codeql-bundle-{platform_name}.tar.gz"
 
@@ -1021,16 +1027,8 @@ def source_asset_name(platform_name: str) -> str:
 def source_platform_for_request(requested_platforms: Iterable[str]) -> str:
     requested = tuple(requested_platforms)
     current = current_bundle_platform()
-    if "linux-arm64" in requested and current != "linux-arm64":
-        raise CacheException(
-            "Linux ARM64 bundles must be built on a Linux ARM64 host."
-        )
     if current == "linux-arm64":
-        if not requested or requested == (current,):
-            return current
-        raise CacheException(
-            "Linux ARM64 hosts can only build Linux ARM64 bundles."
-        )
+        return current
     if not requested:
         return "all"
     if requested == (current,):

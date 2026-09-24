@@ -926,36 +926,26 @@ class CustomBundle(Bundle):
                         """Get a list of paths to tools that are not for the specified platform relative to the root of a bundle."""
                         specialize_path: Optional[Callable[[Path], List[Path]]] = None
                         linux64_subpaths = [Path("linux64"), Path("linux")]
-                        linux_arm64_subpaths = [Path("linux-arm64")]
                         osx64_subpaths = [Path("osx64"), Path("macos")]
                         win64_subpaths = [Path("win64"), Path("windows")]
-                        if platform == BundlePlatform.LINUX:
+                        # ponytail: ARM64 is only shipped in its own source bundle.
+                        if platform in {
+                            BundlePlatform.LINUX,
+                            BundlePlatform.LINUX_ARM64,
+                        }:
                             specialize_path = lambda p: [
                                 p / subpath
-                                for subpath in linux_arm64_subpaths
-                                + osx64_subpaths
-                                + win64_subpaths
-                            ]
-                        elif platform == BundlePlatform.LINUX_ARM64:
-                            specialize_path = lambda p: [
-                                p / subpath
-                                for subpath in linux64_subpaths
-                                + osx64_subpaths
-                                + win64_subpaths
+                                for subpath in osx64_subpaths + win64_subpaths
                             ]
                         elif platform == BundlePlatform.WINDOWS:
                             specialize_path = lambda p: [
                                 p / subpath
-                                for subpath in osx64_subpaths
-                                + linux64_subpaths
-                                + linux_arm64_subpaths
+                                for subpath in osx64_subpaths + linux64_subpaths
                             ]
                         elif platform == BundlePlatform.OSX:
                             specialize_path = lambda p: [
                                 p / subpath
-                                for subpath in linux64_subpaths
-                                + linux_arm64_subpaths
-                                + win64_subpaths
+                                for subpath in linux64_subpaths + win64_subpaths
                             ]
                         else:
                             raise BundleException(f"Unsupported platform {platform}.")
@@ -978,23 +968,16 @@ class CustomBundle(Bundle):
                             exclusion_paths.append(Path("swift/qltest"))
                             exclusion_paths.append(Path("swift/resource-dir"))
 
-                        if platform == BundlePlatform.LINUX:
+                        if platform in {
+                            BundlePlatform.LINUX,
+                            BundlePlatform.LINUX_ARM64,
+                        }:
                             exclusion_paths.append(Path("swift/qltest/osx64"))
                             exclusion_paths.append(Path("swift/resource-dir/osx64"))
-                            exclusion_paths.append(Path("swift/qltest/linux-arm64"))
-                            exclusion_paths.append(Path("swift/resource-dir/linux-arm64"))
-
-                        if platform == BundlePlatform.LINUX_ARM64:
-                            exclusion_paths.append(Path("swift/qltest/osx64"))
-                            exclusion_paths.append(Path("swift/resource-dir/osx64"))
-                            exclusion_paths.append(Path("swift/qltest/linux64"))
-                            exclusion_paths.append(Path("swift/resource-dir/linux64"))
 
                         if platform == BundlePlatform.OSX:
                             exclusion_paths.append(Path("swift/qltest/linux64"))
                             exclusion_paths.append(Path("swift/resource-dir/linux64"))
-                            exclusion_paths.append(Path("swift/qltest/linux-arm64"))
-                            exclusion_paths.append(Path("swift/resource-dir/linux-arm64"))
 
                         tarfile_path_root = Path(tarfile_path.parts[0])
                         exclusion_paths = [
