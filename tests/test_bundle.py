@@ -56,6 +56,14 @@ class BundleTests(unittest.TestCase):
         self.assertIsNone(
             archive_filter(tarfile.TarInfo("codeql/tools/linux64/tool"))
         )
+        self.assertIsNone(
+            archive_filter(tarfile.TarInfo("codeql/swift/qltest/linux64/tool"))
+        )
+        self.assertIsNone(
+            archive_filter(
+                tarfile.TarInfo("codeql/swift/resource-dir/linux64/tool")
+            )
+        )
         self.assertIsNotNone(
             archive_filter(tarfile.TarInfo("codeql/tools/linux-arm64/tool"))
         )

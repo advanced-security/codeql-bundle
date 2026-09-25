@@ -912,7 +912,10 @@ class CustomBundle(Bundle):
                             exclusion_paths.append(Path("swift/qltest/osx64"))
                             exclusion_paths.append(Path("swift/resource-dir/osx64"))
 
-                        if platform == BundlePlatform.OSX:
+                        if platform in {
+                            BundlePlatform.LINUX_ARM64,
+                            BundlePlatform.OSX,
+                        }:
                             exclusion_paths.append(Path("swift/qltest/linux64"))
                             exclusion_paths.append(Path("swift/resource-dir/linux64"))
 
