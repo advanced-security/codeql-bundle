@@ -1023,10 +1023,8 @@ def source_platform_for_request(requested_platforms: Iterable[str]) -> str:
     current = current_bundle_platform()
     if requested and requested != {current}:
         raise CacheException(
-            "Release tags can only build for the current platform "
-            f"({current}); requested {', '.join(sorted(requested))}. "
-            "Run codeql-bundle on each target platform or provide a local "
-            "bundle containing every requested platform."
+            f"Release tags can only build for the current platform ({current}); "
+            f"requested {', '.join(sorted(requested))}."
         )
     return current
 

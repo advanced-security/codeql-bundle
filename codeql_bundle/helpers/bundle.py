@@ -12,7 +12,7 @@ import json
 import os
 import subprocess
 from jsonschema import validate, ValidationError
-from enum import Enum, verify, UNIQUE
+from enum import Enum, StrEnum, verify, UNIQUE
 from dataclasses import dataclass
 from graphlib import TopologicalSorter
 import platform
@@ -195,37 +195,19 @@ def get_compilation_cache_targets(
     return targets
 
 
-@verify(UNIQUE)
-class BundlePlatform(Enum):
-    LINUX = 1
-    WINDOWS = 2
-    OSX = 3
-    LINUX_ARM64 = 4
+class BundlePlatform(StrEnum):
+    LINUX = "linux64"
+    LINUX_ARM64 = "linux-arm64"
+    WINDOWS = "win64"
+    OSX = "osx64"
 
-    @staticmethod
-    def from_string(platform: str) -> "BundlePlatform":
-        if platform.lower() == "linux" or platform.lower() == "linux64":
-            return BundlePlatform.LINUX
-        elif platform.lower() == "linux-arm64":
-            return BundlePlatform.LINUX_ARM64
-        elif platform.lower() == "windows" or platform.lower() == "win64":
-            return BundlePlatform.WINDOWS
-        elif platform.lower() == "osx" or platform.lower() == "osx64":
-            return BundlePlatform.OSX
-        else:
-            raise BundleException(f"Invalid platform {platform}")
-
-    def __str__(self):
-        if self == BundlePlatform.LINUX:
-            return "linux64"
-        elif self == BundlePlatform.LINUX_ARM64:
-            return "linux-arm64"
-        elif self == BundlePlatform.WINDOWS:
-            return "win64"
-        elif self == BundlePlatform.OSX:
-            return "osx64"
-        else:
-            raise BundleException(f"Invalid platform {self}")
+    @classmethod
+    def from_string(cls, platform: str) -> "BundlePlatform":
+        aliases = {"linux": "linux64", "windows": "win64", "osx": "osx64"}
+        try:
+            return cls(aliases.get(platform.lower(), platform.lower()))
+        except ValueError:
+            raise BundleException(f"Invalid platform {platform}") from None
 
 
 class Bundle:
@@ -248,16 +230,10 @@ class Bundle:
         else:
             raise BundleException("Invalid CodeQL bundle path")
 
-        platform_tools = {
-            BundlePlatform.LINUX: "linux64",
-            BundlePlatform.LINUX_ARM64: "linux-arm64",
-            BundlePlatform.OSX: "osx64",
-            BundlePlatform.WINDOWS: "win64",
-        }
         self.platforms = {
-            bundle_platform
-            for bundle_platform, tools in platform_tools.items()
-            if (self.bundle_path / "cpp" / "tools" / tools).exists()
+            platform
+            for platform in BundlePlatform
+            if (self.bundle_path / "cpp" / "tools" / platform).exists()
         }
 
         current_platform = BundlePlatform.from_string(current_bundle_platform())
@@ -903,19 +879,11 @@ class CustomBundle(Bundle):
                     ) -> List[Path]:
                         """Get a list of paths to tools that are not for the specified platform relative to the root of a bundle."""
                         platform_subpaths = {
-                            BundlePlatform.LINUX: [
-                                Path("linux64"),
-                                Path("linux"),
-                            ],
-                            BundlePlatform.LINUX_ARM64: [Path("linux-arm64")],
-                            BundlePlatform.OSX: [Path("osx64"), Path("macos")],
-                            BundlePlatform.WINDOWS: [
-                                Path("win64"),
-                                Path("windows"),
-                            ],
+                            BundlePlatform.LINUX: ("linux64", "linux"),
+                            BundlePlatform.LINUX_ARM64: ("linux-arm64",),
+                            BundlePlatform.OSX: ("osx64", "macos"),
+                            BundlePlatform.WINDOWS: ("win64", "windows"),
                         }
-                        if platform not in platform_subpaths:
-                            raise BundleException(f"Unsupported platform {platform}.")
 
                         return [
                             tools_path / subpath

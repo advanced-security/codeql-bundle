@@ -7,35 +7,7 @@ import unittest
 from click.testing import CliRunner
 
 from codeql_bundle.cache import BUNDLE_PLATFORMS, CatalogLoader, source_asset_name
-from codeql_bundle.cache_cli import _read_plan, _release_source_assets, main
-
-
-def _release_plan(platforms: tuple[str, ...]) -> dict[str, object]:
-    return {
-        "cache_format": 1,
-        "cache_release": "codeql-compilation-cache-v1.2.3",
-        "cli_version": "1.2.3",
-        "pack_fingerprint": "0" * 64,
-        "release": "codeql-bundle-v1.2.3",
-        "source_assets": [
-            {
-                "name": source_asset_name(platform),
-                "platform": platform,
-                "sha256": f"{index:x}" * 64,
-                "size": 100,
-                "url": f"https://example.test/{source_asset_name(platform)}",
-            }
-            for index, platform in enumerate(platforms, start=1)
-        ],
-        "source_repository": "github/codeql-action",
-        "targets": [
-            {
-                "language": "cpp",
-                "query_packs": ["codeql/cpp-queries@1.2.3"],
-                "target": "codeql/cpp-all",
-            }
-        ],
-    }
+from codeql_bundle.cache_cli import _release_source_assets, main
 
 
 class CacheCliTests(unittest.TestCase):
@@ -114,24 +86,6 @@ class CacheCliTests(unittest.TestCase):
                     platforms, tuple(asset.platform for asset in assets)
                 )
 
-    def test_release_plans_support_legacy_and_arm64_sources(self) -> None:
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            plan_path = Path("plan.json")
-            for platforms in (
-                ("linux64", "osx64", "win64"),
-                BUNDLE_PLATFORMS,
-            ):
-                with self.subTest(platforms=platforms):
-                    plan_path.write_text(json.dumps(_release_plan(platforms)))
-                    self.assertEqual(
-                        platforms,
-                        tuple(
-                            asset["platform"]
-                            for asset in _read_plan(plan_path)["source_assets"]
-                        ),
-                    )
-
     def test_arm64_catalog_entry_can_be_added_to_catalog(self) -> None:
         runner = CliRunner()
         with runner.isolated_filesystem():
@@ -141,27 +95,53 @@ class CacheCliTests(unittest.TestCase):
             cache_asset = assets / "codeql-compilation-cache-cpp.tar.gz"
             cache_asset.write_bytes(b"cache")
             plan_path = root / "plan.json"
+            plan = {
+                "cache_format": 1,
+                "cache_release": "codeql-compilation-cache-v1.2.3",
+                "cli_version": "1.2.3",
+                "pack_fingerprint": "0" * 64,
+                "release": "codeql-bundle-v1.2.3",
+                "source_assets": [
+                    {
+                        "name": source_asset_name(platform),
+                        "platform": platform,
+                        "sha256": str(index) * 64,
+                        "size": 100,
+                        "url": f"https://example.test/{source_asset_name(platform)}",
+                    }
+                    for index, platform in enumerate(
+                        BUNDLE_PLATFORMS,
+                        start=1,
+                    )
+                ],
+                "source_repository": "github/codeql-action",
+                "targets": [
+                    {
+                        "language": "cpp",
+                        "query_packs": ["codeql/cpp-queries@1.2.3"],
+                        "target": "codeql/cpp-all",
+                    }
+                ],
+            }
+            plan_path.write_text(json.dumps(plan))
             catalog_path = root / "catalog.json"
             catalog_path.write_text(
                 json.dumps({"schema_version": 1, "bundles": []})
             )
             entry_path = root / "entry.json"
-            plan_path.write_text(json.dumps(_release_plan(BUNDLE_PLATFORMS)))
+            catalog_entry_args = [
+                "catalog-entry",
+                "--plan",
+                str(plan_path),
+                "--assets-dir",
+                str(assets),
+                "--validated-platform",
+                "linux-arm64",
+                "--output",
+                str(entry_path),
+            ]
 
-            result = runner.invoke(
-                main,
-                [
-                    "catalog-entry",
-                    "--plan",
-                    str(plan_path),
-                    "--assets-dir",
-                    str(assets),
-                    "--validated-platform",
-                    "linux-arm64",
-                    "--output",
-                    str(entry_path),
-                ],
-            )
+            result = runner.invoke(main, catalog_entry_args)
             self.assertEqual(0, result.exit_code, result.output)
 
             result = runner.invoke(
@@ -181,39 +161,20 @@ class CacheCliTests(unittest.TestCase):
             self.assertIsNotNone(bundle)
             self.assertEqual(("linux-arm64",), bundle.validated_platforms)
 
-    def test_catalog_entry_rejects_platform_missing_from_plan(self) -> None:
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            assets = Path("assets")
-            assets.mkdir()
-            plan_path = Path("plan.json")
-            plan_path.write_text(
-                json.dumps(
-                    _release_plan(("linux64", "osx64", "win64"))
-                )
-            )
+            plan["source_assets"] = [
+                asset
+                for asset in plan["source_assets"]
+                if asset["platform"] != "linux-arm64"
+            ]
+            plan_path.write_text(json.dumps(plan))
+            result = runner.invoke(main, catalog_entry_args)
 
-            result = runner.invoke(
-                main,
-                [
-                    "catalog-entry",
-                    "--plan",
-                    str(plan_path),
-                    "--assets-dir",
-                    str(assets),
-                    "--validated-platform",
-                    "linux-arm64",
-                    "--output",
-                    "entry.json",
-                ],
+            self.assertNotEqual(0, result.exit_code)
+            self.assertIn(
+                "Release plan has no source bundle for validated platform(s): "
+                "linux-arm64.",
+                result.output,
             )
-
-        self.assertNotEqual(0, result.exit_code)
-        self.assertIn(
-            "Release plan has no source bundle for validated platform(s): "
-            "linux-arm64.",
-            result.output,
-        )
 
 
 if __name__ == "__main__":

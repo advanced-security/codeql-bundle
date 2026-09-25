@@ -45,7 +45,7 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix || '[{"language":"skip","target":"skip"}]' }}
       release: ${{ steps.version.outputs.release }}
       skip: ${{ steps.existing.outputs.skip }}
-      verify_matrix: ${{ steps.plan.outputs.verify_matrix || '[{"platform":"skip","os":"ubuntu-latest"}]' }}
+      verify_os: ${{ steps.plan.outputs.verify_os || '["ubuntu-latest"]' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -131,19 +131,12 @@ jobs:
             --output release-plan.json
           echo "cache_release=$(jq -r '.cache_release' release-plan.json)" >> "$GITHUB_OUTPUT"
           echo "matrix=$(jq -c '.targets' release-plan.json)" >> "$GITHUB_OUTPUT"
-          verify_matrix="$(jq -c '
-            [.source_assets[].platform as $platform |
-              {
-                platform: $platform,
-                os: ({
-                  "linux64": "ubuntu-latest",
-                  "linux-arm64": "ubuntu-24.04-arm",
-                  "osx64": "macos-latest",
-                  "win64": "windows-latest"
-                }[$platform])
-              }
-            ]' release-plan.json)"
-          echo "verify_matrix=$verify_matrix" >> "$GITHUB_OUTPUT"
+          echo "verify_os=$(jq -c '[.source_assets[].platform | {
+            "linux64": "ubuntu-latest",
+            "linux-arm64": "ubuntu-24.04-arm",
+            "osx64": "macos-latest",
+            "win64": "windows-latest"
+          }[.]]' release-plan.json)" >> "$GITHUB_OUTPUT"
 
       - if: steps.existing.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
@@ -203,7 +196,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.plan.outputs.verify_matrix) }}
+        os: ${{ fromJSON(needs.plan.outputs.verify_os) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

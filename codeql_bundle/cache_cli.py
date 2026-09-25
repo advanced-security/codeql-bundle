@@ -215,11 +215,7 @@ def plan_release(
     source_assets = _release_source_assets(release_value)
     platform_name = current_bundle_platform()
     source_asset = next(
-        (
-            asset
-            for asset in source_assets
-            if asset.platform == platform_name
-        ),
+        (asset for asset in source_assets if asset.platform == platform_name),
         None,
     )
     if source_asset is None:
@@ -518,16 +514,13 @@ def catalog_entry(
 ) -> None:
     """Create a catalog entry for verified release assets."""
     plan = _read_plan(plan_path)
-    source_platforms = {
-        source_asset["platform"] for source_asset in plan["source_assets"]
-    }
-    missing_source_platforms = sorted(
-        set(validated_platforms) - source_platforms
-    )
-    if missing_source_platforms:
+    if missing := sorted(
+        set(validated_platforms)
+        - {asset["platform"] for asset in plan["source_assets"]}
+    ):
         raise click.ClickException(
             "Release plan has no source bundle for validated platform(s): "
-            f"{', '.join(missing_source_platforms)}."
+            f"{', '.join(missing)}."
         )
 
     compilation_caches = {}

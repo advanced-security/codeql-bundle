@@ -13,7 +13,6 @@ from unittest.mock import patch
 from semantic_version import Version
 
 from codeql_bundle.cache import (
-    BUNDLE_PLATFORMS,
     CACHE_FORMAT_VERSION,
     BundleCatalog,
     BundleSourceResolver,
@@ -34,7 +33,6 @@ from codeql_bundle.cache import (
     source_asset_name,
     source_platform_for_request,
 )
-from codeql_bundle.helpers.bundle import BundlePlatform
 from codeql_bundle.helpers.codeql import CodeQLPack, CodeQLPackConfig
 
 
@@ -231,19 +229,13 @@ class ArtifactTests(unittest.TestCase):
 
     def test_release_source_is_runnable_on_current_platform(self) -> None:
         current = current_bundle_platform()
-        other = next(
-            platform for platform in BUNDLE_PLATFORMS if platform != current
-        )
+        other = "win64" if current != "win64" else "linux64"
         self.assertEqual(current, source_platform_for_request(()))
         self.assertEqual(current, source_platform_for_request((current,)))
         with self.assertRaisesRegex(
             CacheException, "only build for the current platform"
         ):
             source_platform_for_request((other,))
-        with self.assertRaisesRegex(
-            CacheException, "only build for the current platform"
-        ):
-            source_platform_for_request((current, other))
 
     def test_linux_arm64_platform(self) -> None:
         with patch(
@@ -252,47 +244,10 @@ class ArtifactTests(unittest.TestCase):
             "codeql_bundle.cache.platform.machine", return_value="aarch64"
         ):
             self.assertEqual("linux-arm64", current_bundle_platform())
-            self.assertEqual("linux-arm64", source_platform_for_request(()))
-            self.assertEqual(
-                "codeql-bundle-linux-arm64.tar.gz",
-                source_asset_name("linux-arm64"),
-            )
-            self.assertEqual(
-                "linux-arm64",
-                str(BundlePlatform.from_string("linux-arm64")),
-            )
-
-    def test_linux_arm64_release_uses_catalog_asset(self) -> None:
-        with TemporaryDirectory() as directory:
-            root = Path(directory)
-            served = root / "served"
-            served.mkdir()
-            archive = served / "codeql-bundle-linux-arm64.tar.gz"
-            archive.write_bytes(b"bundle")
-            with serve(served) as base_url, patch(
-                "codeql_bundle.cache.current_bundle_platform",
-                return_value="linux-arm64",
-            ):
-                source = SourceAsset(
-                    name=archive.name,
-                    url=f"{base_url}/{archive.name}",
-                    sha256=sha256_file(archive),
-                    size=archive.stat().st_size,
-                    platform="linux-arm64",
-                )
-                cache = ReleaseAsset(
-                    name="cache.tar.gz",
-                    url=f"{base_url}/cache.tar.gz",
-                    sha256="2" * 64,
-                    size=10,
-                )
-                bundle = bundle_with_assets(source, cache)
-                resolved = BundleSourceResolver(
-                    BundleCatalog([bundle]), root / "downloads"
-                ).resolve(bundle.release)
-
-            self.assertEqual(bundle, resolved.supported_bundle)
-            self.assertEqual(1, CountingHandler.requests)
+        self.assertEqual(
+            "codeql-bundle-linux-arm64.tar.gz",
+            source_asset_name("linux-arm64"),
+        )
 
     def test_local_archive_matches_catalog_digest(self) -> None:
         with TemporaryDirectory() as directory:

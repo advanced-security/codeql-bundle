@@ -37,24 +37,15 @@ with the command:
 codeql-bundle --bundle codeql-bundle-v2.26.1 --output codeql-custom-bundle.tar.gz --workspace <path-to-workspace> --log INFO <packs>
 ```
 
-The upstream all-platform bundle is
-[deprecated](https://github.blog/changelog/2026-09-22-deprecation-notice-all-platform-codeql-bundle/)
-and will be removed in mid-March 2027. Release tags therefore use a
-platform-specific source and can only build for the current platform. Run
-`codeql-bundle` on each target platform.
+Because the upstream all-platform bundle is
+[deprecated](https://github.blog/changelog/2026-09-22-deprecation-notice-all-platform-codeql-bundle/),
+release tags only build for the current target (`linux64`, `linux-arm64`,
+`osx64`, or `win64`). Run once per target; local all-platform archives still
+support multiple targets.
 
 ```bash
 codeql-bundle --bundle codeql-bundle-v2.27.0 --output <path-to-bundles-dir> --workspace <path-to-workspace> --log INFO -p linux64 <packs>
 ```
-
-On a Linux ARM64 host, use the native target:
-
-```bash
-codeql-bundle --bundle codeql-bundle-v2.27.0 --output <path-to-bundles-dir> --workspace <path-to-workspace> --log INFO -p linux-arm64 <packs>
-```
-
-Existing local all-platform archives remain supported for creating multiple
-platform-specific bundles.
 
 ### Compilation caches
 
@@ -118,11 +109,11 @@ codeql-bundle-cache verify-all \
   --assets-dir dist
 ```
 
-`plan-release` validates upstream release metadata and records the supported
-platform-specific source assets. `build` compiles the real standard query packs
-into a per-language cache bounded to 1536 MiB and requires a second real
-compilation to report a cache hit. `verify-all` repeats that check using the
-current platform's upstream bundle.
+`plan-release` validates upstream release metadata and records every source
+asset. `build` compiles the real standard query packs into a per-language cache
+bounded to 1536 MiB and requires a second real compilation to report a cache
+hit. `verify-all` repeats that check using the current platform's upstream
+bundle.
 
 After release assets have been published, `catalog-entry`, `verify-entry`, and
 `update-catalog` create, download-test, and insert the candidate catalog entry.
@@ -134,10 +125,9 @@ The
 [`Build CodeQL compilation caches`](.github/workflows/codeql-compilation-caches.yml)
 workflow polls for the latest stable upstream release and runs immediately when
 the cache implementation lands on `main`. It uses the local commands above,
-parallelizes cache construction, validates every cache on each platform
-published by the upstream release, publishes a dedicated release, performs a
-consumer-path customization test, and opens a pull request for manual review of
-the catalog update.
+parallelizes cache construction, validates every cache on Linux, macOS, and
+Windows, publishes a dedicated release, performs a consumer-path customization
+test, and opens a pull request for manual review of the catalog update.
 
 Use `workflow_dispatch` with `bundle_version` to backfill a specific release.
 The latest stable release is independent of backfill work; releases from
