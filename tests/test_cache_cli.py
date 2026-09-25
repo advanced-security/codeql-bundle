@@ -181,6 +181,40 @@ class CacheCliTests(unittest.TestCase):
             self.assertIsNotNone(bundle)
             self.assertEqual(("linux-arm64",), bundle.validated_platforms)
 
+    def test_catalog_entry_rejects_platform_missing_from_plan(self) -> None:
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            assets = Path("assets")
+            assets.mkdir()
+            plan_path = Path("plan.json")
+            plan_path.write_text(
+                json.dumps(
+                    _release_plan(("linux64", "osx64", "win64"))
+                )
+            )
+
+            result = runner.invoke(
+                main,
+                [
+                    "catalog-entry",
+                    "--plan",
+                    str(plan_path),
+                    "--assets-dir",
+                    str(assets),
+                    "--validated-platform",
+                    "linux-arm64",
+                    "--output",
+                    "entry.json",
+                ],
+            )
+
+        self.assertNotEqual(0, result.exit_code)
+        self.assertIn(
+            "Release plan has no source bundle for validated platform(s): "
+            "linux-arm64.",
+            result.output,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -518,6 +518,18 @@ def catalog_entry(
 ) -> None:
     """Create a catalog entry for verified release assets."""
     plan = _read_plan(plan_path)
+    source_platforms = {
+        source_asset["platform"] for source_asset in plan["source_assets"]
+    }
+    missing_source_platforms = sorted(
+        set(validated_platforms) - source_platforms
+    )
+    if missing_source_platforms:
+        raise click.ClickException(
+            "Release plan has no source bundle for validated platform(s): "
+            f"{', '.join(missing_source_platforms)}."
+        )
+
     compilation_caches = {}
     for target in plan["targets"]:
         asset_name = _cache_asset_name(target["language"])

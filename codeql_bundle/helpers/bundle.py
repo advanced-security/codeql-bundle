@@ -902,36 +902,27 @@ class CustomBundle(Bundle):
                         platform: BundlePlatform,
                     ) -> List[Path]:
                         """Get a list of paths to tools that are not for the specified platform relative to the root of a bundle."""
-                        specialize_path: Optional[Callable[[Path], List[Path]]] = None
-                        linux64_subpaths = [Path("linux64"), Path("linux")]
-                        osx64_subpaths = [Path("osx64"), Path("macos")]
-                        win64_subpaths = [Path("win64"), Path("windows")]
-                        # ponytail: ARM64 is only shipped in its own source bundle.
-                        if platform in {
-                            BundlePlatform.LINUX,
-                            BundlePlatform.LINUX_ARM64,
-                        }:
-                            specialize_path = lambda p: [
-                                p / subpath
-                                for subpath in osx64_subpaths + win64_subpaths
-                            ]
-                        elif platform == BundlePlatform.WINDOWS:
-                            specialize_path = lambda p: [
-                                p / subpath
-                                for subpath in osx64_subpaths + linux64_subpaths
-                            ]
-                        elif platform == BundlePlatform.OSX:
-                            specialize_path = lambda p: [
-                                p / subpath
-                                for subpath in linux64_subpaths + win64_subpaths
-                            ]
-                        else:
+                        platform_subpaths = {
+                            BundlePlatform.LINUX: [
+                                Path("linux64"),
+                                Path("linux"),
+                            ],
+                            BundlePlatform.LINUX_ARM64: [Path("linux-arm64")],
+                            BundlePlatform.OSX: [Path("osx64"), Path("macos")],
+                            BundlePlatform.WINDOWS: [
+                                Path("win64"),
+                                Path("windows"),
+                            ],
+                        }
+                        if platform not in platform_subpaths:
                             raise BundleException(f"Unsupported platform {platform}.")
 
                         return [
-                            candidate
-                            for candidates in map(specialize_path, relative_tools_paths)
-                            for candidate in candidates
+                            tools_path / subpath
+                            for tools_path in relative_tools_paths
+                            for candidate_platform, subpaths in platform_subpaths.items()
+                            if candidate_platform != platform
+                            for subpath in subpaths
                         ]
 
                     def filter(tarinfo: tarfile.TarInfo) -> Optional[tarfile.TarInfo]:
