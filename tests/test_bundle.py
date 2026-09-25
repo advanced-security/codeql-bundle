@@ -68,6 +68,49 @@ class BundleTests(unittest.TestCase):
             archive_filter(tarfile.TarInfo("codeql/tools/linux-arm64/tool"))
         )
 
+    def test_non_arm_bundles_exclude_linux_arm64_swift_tools(self) -> None:
+        for platform, native_swift_platform in (
+            (BundlePlatform.LINUX, "linux64"),
+            (BundlePlatform.OSX, "osx64"),
+        ):
+            with self.subTest(platform=platform), TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = object.__new__(CustomBundle)
+                bundle.tmp_dir = TemporaryDirectory()
+                bundle.bundle_path = root / "bundle"
+                bundle.languages = set()
+                bundle.platforms = {platform}
+
+                with patch(
+                    "codeql_bundle.helpers.bundle.tarfile.open"
+                ) as open_archive:
+                    bundle.bundle(root, {platform})
+
+                archive_filter = (
+                    open_archive.return_value.__enter__.return_value.add.call_args.kwargs[
+                        "filter"
+                    ]
+                )
+                self.assertIsNone(
+                    archive_filter(
+                        tarfile.TarInfo("codeql/swift/qltest/linux-arm64/tool")
+                    )
+                )
+                self.assertIsNone(
+                    archive_filter(
+                        tarfile.TarInfo(
+                            "codeql/swift/resource-dir/linux-arm64/tool"
+                        )
+                    )
+                )
+                self.assertIsNotNone(
+                    archive_filter(
+                        tarfile.TarInfo(
+                            f"codeql/swift/qltest/{native_swift_platform}/tool"
+                        )
+                    )
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

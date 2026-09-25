@@ -919,6 +919,15 @@ class CustomBundle(Bundle):
                             exclusion_paths.append(Path("swift/qltest/linux64"))
                             exclusion_paths.append(Path("swift/resource-dir/linux64"))
 
+                        if platform in {
+                            BundlePlatform.LINUX,
+                            BundlePlatform.OSX,
+                        }:
+                            exclusion_paths.append(Path("swift/qltest/linux-arm64"))
+                            exclusion_paths.append(
+                                Path("swift/resource-dir/linux-arm64")
+                            )
+
                         tarfile_path_root = Path(tarfile_path.parts[0])
                         exclusion_paths = [
                             tarfile_path_root / path for path in exclusion_paths
