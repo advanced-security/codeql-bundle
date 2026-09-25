@@ -274,6 +274,36 @@ class ArtifactTests(unittest.TestCase):
 
         self.assertEqual(bundle, resolved.supported_bundle)
 
+    def test_cataloged_release_uses_legacy_all_platform_asset(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            served = root / "served"
+            served.mkdir()
+            archive = served / "codeql-bundle.tar.gz"
+            archive.write_bytes(b"bundle")
+            with serve(served) as base_url:
+                source = SourceAsset(
+                    name=archive.name,
+                    url=f"{base_url}/{archive.name}",
+                    sha256=sha256_file(archive),
+                    size=archive.stat().st_size,
+                    platform="all",
+                )
+                cache = ReleaseAsset(
+                    name="cache.tar.gz",
+                    url=f"{base_url}/cache.tar.gz",
+                    sha256="2" * 64,
+                    size=10,
+                )
+                bundle = bundle_with_assets(source, cache)
+                resolved = BundleSourceResolver(
+                    BundleCatalog([bundle]), root / "downloads"
+                ).resolve(bundle.release)
+
+            self.assertEqual(bundle, resolved.supported_bundle)
+            self.assertEqual(source.sha256, resolved.digest)
+            self.assertEqual(archive.read_bytes(), resolved.path.read_bytes())
+
     def test_url_download_is_reused(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)

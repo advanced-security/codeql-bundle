@@ -173,12 +173,18 @@ class SupportedBundle:
         }
 
     def source_asset_for_platform(self, platform_name: str) -> Optional[SourceAsset]:
-        return next(
+        asset = next(
             (
                 asset
                 for asset in self.source_assets
                 if asset.platform == platform_name
             ),
+            None,
+        )
+        if asset is not None:
+            return asset
+        return next(
+            (asset for asset in self.source_assets if asset.platform == "all"),
             None,
         )
 
