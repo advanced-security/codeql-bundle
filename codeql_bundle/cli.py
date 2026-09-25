@@ -66,10 +66,7 @@ logger = logging.getLogger(__name__)
     "-p",
     "--platform",
     multiple=True,
-    type=click.Choice(
-        BUNDLE_PLATFORMS,
-        case_sensitive=False,
-    ),
+    type=click.Choice(BUNDLE_PLATFORMS, case_sensitive=False),
     help="Target platform for the bundle",
 )
 @click.option(

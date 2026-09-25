@@ -134,9 +134,10 @@ The
 [`Build CodeQL compilation caches`](.github/workflows/codeql-compilation-caches.yml)
 workflow polls for the latest stable upstream release and runs immediately when
 the cache implementation lands on `main`. It uses the local commands above,
-parallelizes cache construction, validates every cache on Linux, macOS, and
-Windows, publishes a dedicated release, performs a consumer-path customization
-test, and opens a pull request for manual review of the catalog update.
+parallelizes cache construction, validates every cache on each platform
+published by the upstream release, publishes a dedicated release, performs a
+consumer-path customization test, and opens a pull request for manual review of
+the catalog update.
 
 Use `workflow_dispatch` with `bundle_version` to backfill a specific release.
 The latest stable release is independent of backfill work; releases from

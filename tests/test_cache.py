@@ -262,6 +262,38 @@ class ArtifactTests(unittest.TestCase):
                 str(BundlePlatform.from_string("linux-arm64")),
             )
 
+    def test_linux_arm64_release_uses_catalog_asset(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            served = root / "served"
+            served.mkdir()
+            archive = served / "codeql-bundle-linux-arm64.tar.gz"
+            archive.write_bytes(b"bundle")
+            with serve(served) as base_url, patch(
+                "codeql_bundle.cache.current_bundle_platform",
+                return_value="linux-arm64",
+            ):
+                source = SourceAsset(
+                    name=archive.name,
+                    url=f"{base_url}/{archive.name}",
+                    sha256=sha256_file(archive),
+                    size=archive.stat().st_size,
+                    platform="linux-arm64",
+                )
+                cache = ReleaseAsset(
+                    name="cache.tar.gz",
+                    url=f"{base_url}/cache.tar.gz",
+                    sha256="2" * 64,
+                    size=10,
+                )
+                bundle = bundle_with_assets(source, cache)
+                resolved = BundleSourceResolver(
+                    BundleCatalog([bundle]), root / "downloads"
+                ).resolve(bundle.release)
+
+            self.assertEqual(bundle, resolved.supported_bundle)
+            self.assertEqual(1, CountingHandler.requests)
+
     def test_local_archive_matches_catalog_digest(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)

@@ -51,8 +51,7 @@ from codeql_bundle.helpers.bundle import (
 
 logger = logging.getLogger(__name__)
 
-# Linux ARM64 compilation-cache publication remains out of scope.
-SOURCE_PLATFORMS = ("linux64", "osx64", "win64")
+REQUIRED_SOURCE_PLATFORMS = frozenset(("linux64", "osx64", "win64"))
 MAX_RELEASE_ASSET_SIZE = 2 * 1024 * 1024 * 1024
 DEFAULT_COMPILATION_CACHE_SIZE_MB = 1536
 
@@ -214,11 +213,19 @@ def plan_release(
     client = GitHubReleaseClient()
     release_value = client.release(release)
     source_assets = _release_source_assets(release_value)
+    platform_name = current_bundle_platform()
     source_asset = next(
-        asset
-        for asset in source_assets
-        if asset.platform == current_bundle_platform()
+        (
+            asset
+            for asset in source_assets
+            if asset.platform == platform_name
+        ),
+        None,
     )
+    if source_asset is None:
+        raise click.ClickException(
+            f"Release {release} has no source bundle for {platform_name}."
+        )
     source_path = cache_path(cache_dir, "sources", release, source_asset.name)
     download_file(
         source_asset.url,
@@ -495,7 +502,7 @@ def _verify_cache_with_bundle(
     "validated_platforms",
     multiple=True,
     required=True,
-    type=click.Choice(["linux64", "osx64", "win64"]),
+    type=click.Choice(BUNDLE_PLATFORMS),
 )
 @click.option(
     "--output",
@@ -583,10 +590,12 @@ def update_catalog(
 def _release_source_assets(release: dict[str, Any]) -> tuple[SourceAsset, ...]:
     assets = {asset["name"]: asset for asset in release.get("assets", [])}
     result = []
-    for platform_name in SOURCE_PLATFORMS:
+    for platform_name in BUNDLE_PLATFORMS:
         name = source_asset_name(platform_name)
         asset = assets.get(name)
         if asset is None:
+            if platform_name not in REQUIRED_SOURCE_PLATFORMS:
+                continue
             raise click.ClickException(
                 f"Upstream release {release['tag_name']} has no {name}."
             )
@@ -802,10 +811,11 @@ def _read_plan(path: Path) -> dict[str, Any]:
             validate_remote_url(source.url)
             source_platforms.add(source.platform)
         if (
-            source_platforms != set(SOURCE_PLATFORMS)
-            or len(value["source_assets"]) != len(SOURCE_PLATFORMS)
+            not REQUIRED_SOURCE_PLATFORMS.issubset(source_platforms)
+            or not source_platforms.issubset(BUNDLE_PLATFORMS)
+            or len(value["source_assets"]) != len(source_platforms)
         ):
-            raise ValueError("incomplete source platform inventory")
+            raise ValueError("invalid source platform inventory")
 
         target_names = set()
         languages = set()

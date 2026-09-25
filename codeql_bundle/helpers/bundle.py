@@ -248,36 +248,17 @@ class Bundle:
         else:
             raise BundleException("Invalid CodeQL bundle path")
 
-        def supports_linux() -> set[BundlePlatform]:
-            if (self.bundle_path / "cpp" / "tools" / "linux64").exists():
-                return {BundlePlatform.LINUX}
-            else:
-                return set()
-
-        def supports_linux_arm64() -> set[BundlePlatform]:
-            if (self.bundle_path / "cpp" / "tools" / "linux-arm64").exists():
-                return {BundlePlatform.LINUX_ARM64}
-            else:
-                return set()
-
-        def supports_macos() -> set[BundlePlatform]:
-            if (self.bundle_path / "cpp" / "tools" / "osx64").exists():
-                return {BundlePlatform.OSX}
-            else:
-                return set()
-
-        def supports_windows() -> set[BundlePlatform]:
-            if (self.bundle_path / "cpp" / "tools" / "win64").exists():
-                return {BundlePlatform.WINDOWS}
-            else:
-                return set()
-
-        self.platforms: set[BundlePlatform] = (
-            supports_linux()
-            | supports_linux_arm64()
-            | supports_macos()
-            | supports_windows()
-        )
+        platform_tools = {
+            BundlePlatform.LINUX: "linux64",
+            BundlePlatform.LINUX_ARM64: "linux-arm64",
+            BundlePlatform.OSX: "osx64",
+            BundlePlatform.WINDOWS: "win64",
+        }
+        self.platforms = {
+            bundle_platform
+            for bundle_platform, tools in platform_tools.items()
+            if (self.bundle_path / "cpp" / "tools" / tools).exists()
+        }
 
         current_platform = BundlePlatform.from_string(current_bundle_platform())
         if current_platform not in self.platforms:
@@ -794,27 +775,23 @@ class CustomBundle(Bundle):
 
         # Add the certificates to the Java keystores
         if "CodeQLBundleAdditionalCertificates" in config:
-            keytool_paths = {
-                "linux64": "tools/linux64/java/bin/keytool",
-                "linux-arm64": "tools/linux-arm64/java/bin/keytool",
-                "osx64": "tools/osx64/java/bin/keytool",
-                "win64": "tools/win64/java/bin/keytool.exe",
-            }
-            keytool = self.bundle_path / keytool_paths[current_bundle_platform()]
+            platform_name = current_bundle_platform()
+            keytool = (
+                self.bundle_path
+                / "tools"
+                / platform_name
+                / "java"
+                / "bin"
+                / ("keytool.exe" if platform_name == "win64" else "keytool")
+            )
             if not keytool.exists():
                 raise BundleException(f"Keytool {keytool} does not exist.")
 
-            keystores = [
-                self.bundle_path / path
-                for path in [
-                    "tools/win64/java/lib/security/cacerts",
-                    "tools/linux64/java/lib/security/cacerts",
-                    "tools/linux-arm64/java/lib/security/cacerts",
-                    "tools/osx64/java/lib/security/cacerts",
-                    "tools/osx64/java-aarch64/lib/security/cacerts",
-                ]
-                if (self.bundle_path / path).exists()
-            ]
+            keystores = list(
+                (self.bundle_path / "tools").glob(
+                    "*/java*/lib/security/cacerts"
+                )
+            )
             if not keystores:
                 raise BundleException("The bundle contains no Java keystores.")
 

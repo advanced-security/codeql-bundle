@@ -724,12 +724,7 @@ class BundleSourceResolver:
     ) -> ResolvedBundleSource:
         platform_name = source_platform_for_request(requested_platforms)
         validate_release(release)
-        # ponytail: ARM64 has no compilation-cache catalog; fetch its release asset.
-        bundle = (
-            None
-            if platform_name == "linux-arm64"
-            else self.catalog.find_release(release)
-        )
+        bundle = self.catalog.find_release(release)
         if bundle:
             asset = bundle.source_asset_for_platform(platform_name)
             if asset is None:
