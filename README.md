@@ -18,14 +18,14 @@ For more details on CodeQL customization packs see the section [CodeQL customiza
 The CodeQL bundle application can be installed using `pip` with the command:
 
 ```bash
-python3.11 -m pip install https://github.com/advanced-security/codeql-bundle/releases/download/v0.5.0/codeql_bundle-0.5.0-py3-none-any.whl
+python3.11 -m pip install https://github.com/advanced-security/codeql-bundle/releases/download/v0.6.0/codeql_bundle-0.6.0-py3-none-any.whl
 ```
 
 ## Usage
 
 The source bundle can be an existing local archive or directory, a
-`github/codeql-action` release tag, or an HTTP(S) URL. Release tags and URLs are
-downloaded into a persistent local cache.
+`github/codeql-action` release tag, or an HTTP(S) URL. Release tags select the
+current platform's bundle, and downloads are stored in a persistent local cache.
 
 The CodeQL bundle application requires a [CodeQL workspace](https://codeql.github.com/docs/codeql-cli/about-codeql-workspaces/) to locate the packs you want to include in a custom bundle.
 You can see the packs available in your workspace by running `codeql pack ls -- <dir>` where `<dir>` is the root directory of your CodeQL workspace.
@@ -37,11 +37,14 @@ with the command:
 codeql-bundle --bundle codeql-bundle-v2.26.1 --output codeql-custom-bundle.tar.gz --workspace <path-to-workspace> --log INFO <packs>
 ```
 
-If the source bundle is the platform agnostic bundle then you can create platform specific bundles to reduce the size of the used bundle(s).
-The following example creates platform specific bundles for all the currently supported platforms.
+Because the upstream all-platform bundle is
+[deprecated](https://github.blog/changelog/2026-09-22-deprecation-notice-all-platform-codeql-bundle/),
+release tags only build for the current target (`linux64`, `linux-arm64`,
+`osx64`, or `win64`). Run once per target; local all-platform archives still
+support multiple targets.
 
 ```bash
-codeql-bundle --bundle <path-to-platform-agnostic-bundle> --output <path-to-bundles-dir> --workspace <path-to-workspace> --log INFO -p linux64 -p osx64 -p win64 <packs>
+codeql-bundle --bundle codeql-bundle-v2.27.0 --output <path-to-bundles-dir> --workspace <path-to-workspace> --log INFO -p linux64 <packs>
 ```
 
 ### Compilation caches

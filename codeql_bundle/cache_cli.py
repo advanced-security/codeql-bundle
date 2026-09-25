@@ -14,6 +14,7 @@ import click
 from semantic_version import Version
 
 from codeql_bundle.cache import (
+    BUNDLE_PLATFORMS,
     CACHE_FORMAT_VERSION,
     CODEQL_ACTION_REPOSITORY,
     BundleCatalog,
@@ -50,7 +51,7 @@ from codeql_bundle.helpers.bundle import (
 
 logger = logging.getLogger(__name__)
 
-SOURCE_PLATFORMS = ("all", "linux64", "osx64", "win64")
+REQUIRED_SOURCE_PLATFORMS = frozenset(("linux64", "osx64", "win64"))
 MAX_RELEASE_ASSET_SIZE = 2 * 1024 * 1024 * 1024
 DEFAULT_COMPILATION_CACHE_SIZE_MB = 1536
 
@@ -142,7 +143,7 @@ def prune_cache(cache_dir: Path, max_age_days: float, dry_run: bool) -> None:
     "--platform",
     "platforms",
     multiple=True,
-    type=click.Choice(["linux64", "osx64", "win64"]),
+    type=click.Choice(BUNDLE_PLATFORMS),
 )
 @click.option(
     "--cache-dir",
@@ -212,11 +213,15 @@ def plan_release(
     client = GitHubReleaseClient()
     release_value = client.release(release)
     source_assets = _release_source_assets(release_value)
+    platform_name = current_bundle_platform()
     source_asset = next(
-        asset
-        for asset in source_assets
-        if asset.platform == current_bundle_platform()
+        (asset for asset in source_assets if asset.platform == platform_name),
+        None,
     )
+    if source_asset is None:
+        raise click.ClickException(
+            f"Release {release} has no source bundle for {platform_name}."
+        )
     source_path = cache_path(cache_dir, "sources", release, source_asset.name)
     download_file(
         source_asset.url,
@@ -493,7 +498,7 @@ def _verify_cache_with_bundle(
     "validated_platforms",
     multiple=True,
     required=True,
-    type=click.Choice(["linux64", "osx64", "win64"]),
+    type=click.Choice(BUNDLE_PLATFORMS),
 )
 @click.option(
     "--output",
@@ -509,6 +514,15 @@ def catalog_entry(
 ) -> None:
     """Create a catalog entry for verified release assets."""
     plan = _read_plan(plan_path)
+    if missing := sorted(
+        set(validated_platforms)
+        - {asset["platform"] for asset in plan["source_assets"]}
+    ):
+        raise click.ClickException(
+            "Release plan has no source bundle for validated platform(s): "
+            f"{', '.join(missing)}."
+        )
+
     compilation_caches = {}
     for target in plan["targets"]:
         asset_name = _cache_asset_name(target["language"])
@@ -581,10 +595,12 @@ def update_catalog(
 def _release_source_assets(release: dict[str, Any]) -> tuple[SourceAsset, ...]:
     assets = {asset["name"]: asset for asset in release.get("assets", [])}
     result = []
-    for platform_name in SOURCE_PLATFORMS:
+    for platform_name in BUNDLE_PLATFORMS:
         name = source_asset_name(platform_name)
         asset = assets.get(name)
         if asset is None:
+            if platform_name not in REQUIRED_SOURCE_PLATFORMS:
+                continue
             raise click.ClickException(
                 f"Upstream release {release['tag_name']} has no {name}."
             )
@@ -800,10 +816,11 @@ def _read_plan(path: Path) -> dict[str, Any]:
             validate_remote_url(source.url)
             source_platforms.add(source.platform)
         if (
-            source_platforms != set(SOURCE_PLATFORMS)
-            or len(value["source_assets"]) != len(SOURCE_PLATFORMS)
+            not REQUIRED_SOURCE_PLATFORMS.issubset(source_platforms)
+            or not source_platforms.issubset(BUNDLE_PLATFORMS)
+            or len(value["source_assets"]) != len(source_platforms)
         ):
-            raise ValueError("incomplete source platform inventory")
+            raise ValueError("invalid source platform inventory")
 
         target_names = set()
         languages = set()

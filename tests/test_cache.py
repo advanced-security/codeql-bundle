@@ -30,6 +30,7 @@ from codeql_bundle.cache import (
     current_bundle_platform,
     safe_extract_tar,
     sha256_file,
+    source_asset_name,
     source_platform_for_request,
 )
 from codeql_bundle.helpers.codeql import CodeQLPack, CodeQLPackConfig
@@ -228,16 +229,24 @@ class ArtifactTests(unittest.TestCase):
 
     def test_release_source_is_runnable_on_current_platform(self) -> None:
         current = current_bundle_platform()
-        other = next(
-            platform
-            for platform in ("linux64", "osx64", "win64")
-            if platform != current
-        )
-        self.assertEqual("all", source_platform_for_request(()))
+        other = "win64" if current != "win64" else "linux64"
+        self.assertEqual(current, source_platform_for_request(()))
         self.assertEqual(current, source_platform_for_request((current,)))
-        self.assertEqual("all", source_platform_for_request((other,)))
+        with self.assertRaisesRegex(
+            CacheException, "only build for the current platform"
+        ):
+            source_platform_for_request((other,))
+
+    def test_linux_arm64_platform(self) -> None:
+        with patch(
+            "codeql_bundle.cache.platform.system", return_value="Linux"
+        ), patch(
+            "codeql_bundle.cache.platform.machine", return_value="aarch64"
+        ):
+            self.assertEqual("linux-arm64", current_bundle_platform())
         self.assertEqual(
-            "all", source_platform_for_request(("linux64", "win64"))
+            "codeql-bundle-linux-arm64.tar.gz",
+            source_asset_name("linux-arm64"),
         )
 
     def test_local_archive_matches_catalog_digest(self) -> None:
@@ -264,6 +273,36 @@ class ArtifactTests(unittest.TestCase):
             ).resolve(str(archive))
 
         self.assertEqual(bundle, resolved.supported_bundle)
+
+    def test_cataloged_release_uses_legacy_all_platform_asset(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            served = root / "served"
+            served.mkdir()
+            archive = served / "codeql-bundle.tar.gz"
+            archive.write_bytes(b"bundle")
+            with serve(served) as base_url:
+                source = SourceAsset(
+                    name=archive.name,
+                    url=f"{base_url}/{archive.name}",
+                    sha256=sha256_file(archive),
+                    size=archive.stat().st_size,
+                    platform="all",
+                )
+                cache = ReleaseAsset(
+                    name="cache.tar.gz",
+                    url=f"{base_url}/cache.tar.gz",
+                    sha256="2" * 64,
+                    size=10,
+                )
+                bundle = bundle_with_assets(source, cache)
+                resolved = BundleSourceResolver(
+                    BundleCatalog([bundle]), root / "downloads"
+                ).resolve(bundle.release)
+
+            self.assertEqual(bundle, resolved.supported_bundle)
+            self.assertEqual(source.sha256, resolved.digest)
+            self.assertEqual(archive.read_bytes(), resolved.path.read_bytes())
 
     def test_url_download_is_reused(self) -> None:
         with TemporaryDirectory() as directory:
@@ -345,10 +384,7 @@ class ArtifactTests(unittest.TestCase):
                     BundleCatalog([]),
                     root / "downloads",
                     release_client=ReleaseClient(),
-                ).resolve(
-                    "codeql-bundle-v1.2.3",
-                    [current_bundle_platform()],
-                )
+                ).resolve("codeql-bundle-v1.2.3")
 
             self.assertEqual(sha256_file(archive), resolved.digest)
 

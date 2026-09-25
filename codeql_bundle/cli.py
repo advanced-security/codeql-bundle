@@ -12,6 +12,7 @@ from pathlib import Path
 from codeql_bundle.helpers.codeql import CodeQLException
 from codeql_bundle.helpers.bundle import CustomBundle, BundleException, BundlePlatform
 from codeql_bundle.cache import (
+    BUNDLE_PLATFORMS,
     BundleCatalog,
     BundleSourceResolver,
     CacheException,
@@ -65,7 +66,7 @@ logger = logging.getLogger(__name__)
     "-p",
     "--platform",
     multiple=True,
-    type=click.Choice(["linux64", "osx64", "win64"], case_sensitive=False),
+    type=click.Choice(BUNDLE_PLATFORMS, case_sensitive=False),
     help="Target platform for the bundle",
 )
 @click.option(

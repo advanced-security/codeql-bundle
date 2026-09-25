@@ -12,7 +12,7 @@ import json
 import os
 import subprocess
 from jsonschema import validate, ValidationError
-from enum import Enum, verify, UNIQUE
+from enum import Enum, StrEnum, verify, UNIQUE
 from dataclasses import dataclass
 from graphlib import TopologicalSorter
 import platform
@@ -20,6 +20,7 @@ import concurrent.futures
 from codeql_bundle.cache import (
     CompilationCacheManager,
     compute_pack_fingerprint,
+    current_bundle_platform,
     safe_extract_tar,
 )
 
@@ -194,32 +195,19 @@ def get_compilation_cache_targets(
     return targets
 
 
-@verify(UNIQUE)
-class BundlePlatform(Enum):
-    LINUX = 1
-    WINDOWS = 2
-    OSX = 3
+class BundlePlatform(StrEnum):
+    LINUX = "linux64"
+    LINUX_ARM64 = "linux-arm64"
+    WINDOWS = "win64"
+    OSX = "osx64"
 
-    @staticmethod
-    def from_string(platform: str) -> "BundlePlatform":
-        if platform.lower() == "linux" or platform.lower() == "linux64":
-            return BundlePlatform.LINUX
-        elif platform.lower() == "windows" or platform.lower() == "win64":
-            return BundlePlatform.WINDOWS
-        elif platform.lower() == "osx" or platform.lower() == "osx64":
-            return BundlePlatform.OSX
-        else:
-            raise BundleException(f"Invalid platform {platform}")
-
-    def __str__(self):
-        if self == BundlePlatform.LINUX:
-            return "linux64"
-        elif self == BundlePlatform.WINDOWS:
-            return "win64"
-        elif self == BundlePlatform.OSX:
-            return "osx64"
-        else:
-            raise BundleException(f"Invalid platform {self}")
+    @classmethod
+    def from_string(cls, platform: str) -> "BundlePlatform":
+        aliases = {"linux": "linux64", "windows": "win64", "osx": "osx64"}
+        try:
+            return cls(aliases.get(platform.lower(), platform.lower()))
+        except ValueError:
+            raise BundleException(f"Invalid platform {platform}") from None
 
 
 class Bundle:
@@ -242,39 +230,15 @@ class Bundle:
         else:
             raise BundleException("Invalid CodeQL bundle path")
 
-        def supports_linux() -> set[BundlePlatform]:
-            if (self.bundle_path / "cpp" / "tools" / "linux64").exists():
-                return {BundlePlatform.LINUX}
-            else:
-                return set()
+        self.platforms = {
+            platform
+            for platform in BundlePlatform
+            if (self.bundle_path / "cpp" / "tools" / platform).exists()
+        }
 
-        def supports_macos() -> set[BundlePlatform]:
-            if (self.bundle_path / "cpp" / "tools" / "osx64").exists():
-                return {BundlePlatform.OSX}
-            else:
-                return set()
-
-        def supports_windows() -> set[BundlePlatform]:
-            if (self.bundle_path / "cpp" / "tools" / "win64").exists():
-                return {BundlePlatform.WINDOWS}
-            else:
-                return set()
-
-        self.platforms: set[BundlePlatform] = (
-            supports_linux() | supports_macos() | supports_windows()
-        )
-
-        current_system = platform.system()
-        if not current_system in ["Linux", "Darwin", "Windows"]:
-            raise BundleException(f"Unsupported system: {current_system}")
-        if current_system == "Linux" and BundlePlatform.LINUX not in self.platforms:
-            raise BundleException("Bundle doesn't support Linux!")
-        elif current_system == "Darwin" and BundlePlatform.OSX not in self.platforms:
-            raise BundleException("Bundle doesn't support OSX!")
-        elif (
-            current_system == "Windows" and BundlePlatform.WINDOWS not in self.platforms
-        ):
-            raise BundleException("Bundle doesn't support Windows!")
+        current_platform = BundlePlatform.from_string(current_bundle_platform())
+        if current_platform not in self.platforms:
+            raise BundleException(f"Bundle doesn't support {current_platform}!")
 
         self.codeql = CodeQL(self.bundle_codeql_exe)
 
@@ -785,28 +749,28 @@ class CustomBundle(Bundle):
 
         config = load_config(config_path)
 
-        if platform.system() == "Windows":
-            keytool = "tools/win64/java/bin/keytool.exe"
-        elif platform.system() == "Linux":
-            keytool = "tools/linux64/java/bin/keytool"
-        elif platform.system() == "Darwin":
-            keytool = "tools/osx64/java/bin/keytool"
-        else:
-            raise BundleException(f"Unsupported platform {platform.system()}")
-
-        keytool = self.bundle_path / keytool
-        if not keytool.exists():
-            raise BundleException(f"Keytool {keytool} does not exist.")
-
-        keystores: list[str] = [
-            "tools/win64/java/lib/security/cacerts",
-            "tools/linux64/java/lib/security/cacerts",
-            "tools/osx64/java/lib/security/cacerts",
-            "tools/osx64/java-aarch64/lib/security/cacerts",
-        ]
-
         # Add the certificates to the Java keystores
         if "CodeQLBundleAdditionalCertificates" in config:
+            platform_name = current_bundle_platform()
+            keytool = (
+                self.bundle_path
+                / "tools"
+                / platform_name
+                / "java"
+                / "bin"
+                / ("keytool.exe" if platform_name == "win64" else "keytool")
+            )
+            if not keytool.exists():
+                raise BundleException(f"Keytool {keytool} does not exist.")
+
+            keystores = list(
+                (self.bundle_path / "tools").glob(
+                    "*/java*/lib/security/cacerts"
+                )
+            )
+            if not keystores:
+                raise BundleException("The bundle contains no Java keystores.")
+
             for cert in config["CodeQLBundleAdditionalCertificates"]:
                 src = workspace_path / Path(cert["Source"])
                 src = src.resolve()
@@ -818,9 +782,6 @@ class CustomBundle(Bundle):
                     raise BundleException(f"Certificate file {src} does not exist.")
 
                 for keystore in keystores:
-                    keystore = self.bundle_path / keystore
-                    if not keystore.exists():
-                        raise BundleException(f"Keystore {keystore} does not exist.")
                     logging.info(f"Adding certificate {src} to keystore {keystore}")
                     subprocess.run(
                         [
@@ -917,32 +878,19 @@ class CustomBundle(Bundle):
                         platform: BundlePlatform,
                     ) -> List[Path]:
                         """Get a list of paths to tools that are not for the specified platform relative to the root of a bundle."""
-                        specialize_path: Optional[Callable[[Path], List[Path]]] = None
-                        linux64_subpaths = [Path("linux64"), Path("linux")]
-                        osx64_subpaths = [Path("osx64"), Path("macos")]
-                        win64_subpaths = [Path("win64"), Path("windows")]
-                        if platform == BundlePlatform.LINUX:
-                            specialize_path = lambda p: [
-                                p / subpath
-                                for subpath in osx64_subpaths + win64_subpaths
-                            ]
-                        elif platform == BundlePlatform.WINDOWS:
-                            specialize_path = lambda p: [
-                                p / subpath
-                                for subpath in osx64_subpaths + linux64_subpaths
-                            ]
-                        elif platform == BundlePlatform.OSX:
-                            specialize_path = lambda p: [
-                                p / subpath
-                                for subpath in linux64_subpaths + win64_subpaths
-                            ]
-                        else:
-                            raise BundleException(f"Unsupported platform {platform}.")
+                        platform_subpaths = {
+                            BundlePlatform.LINUX: ("linux64", "linux"),
+                            BundlePlatform.LINUX_ARM64: ("linux-arm64",),
+                            BundlePlatform.OSX: ("osx64", "macos"),
+                            BundlePlatform.WINDOWS: ("win64", "windows"),
+                        }
 
                         return [
-                            candidate
-                            for candidates in map(specialize_path, relative_tools_paths)
-                            for candidate in candidates
+                            tools_path / subpath
+                            for tools_path in relative_tools_paths
+                            for candidate_platform, subpaths in platform_subpaths.items()
+                            if candidate_platform != platform
+                            for subpath in subpaths
                         ]
 
                     def filter(tarinfo: tarfile.TarInfo) -> Optional[tarfile.TarInfo]:
@@ -957,13 +905,28 @@ class CustomBundle(Bundle):
                             exclusion_paths.append(Path("swift/qltest"))
                             exclusion_paths.append(Path("swift/resource-dir"))
 
-                        if platform == BundlePlatform.LINUX:
+                        if platform in {
+                            BundlePlatform.LINUX,
+                            BundlePlatform.LINUX_ARM64,
+                        }:
                             exclusion_paths.append(Path("swift/qltest/osx64"))
                             exclusion_paths.append(Path("swift/resource-dir/osx64"))
 
-                        if platform == BundlePlatform.OSX:
+                        if platform in {
+                            BundlePlatform.LINUX_ARM64,
+                            BundlePlatform.OSX,
+                        }:
                             exclusion_paths.append(Path("swift/qltest/linux64"))
                             exclusion_paths.append(Path("swift/resource-dir/linux64"))
+
+                        if platform in {
+                            BundlePlatform.LINUX,
+                            BundlePlatform.OSX,
+                        }:
+                            exclusion_paths.append(Path("swift/qltest/linux-arm64"))
+                            exclusion_paths.append(
+                                Path("swift/resource-dir/linux-arm64")
+                            )
 
                         tarfile_path_root = Path(tarfile_path.parts[0])
                         exclusion_paths = [

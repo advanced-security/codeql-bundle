@@ -6,8 +6,8 @@ import unittest
 
 from click.testing import CliRunner
 
-from codeql_bundle.cache import CatalogLoader
-from codeql_bundle.cache_cli import main
+from codeql_bundle.cache import BUNDLE_PLATFORMS, CatalogLoader, source_asset_name
+from codeql_bundle.cache_cli import _release_source_assets, main
 
 
 class CacheCliTests(unittest.TestCase):
@@ -61,7 +61,32 @@ class CacheCliTests(unittest.TestCase):
         self.assertNotEqual(0, result.exit_code)
         self.assertIn("Invalid release plan", result.output)
 
-    def test_catalog_entry_can_be_added_to_catalog(self) -> None:
+    def test_release_source_assets_include_arm64_when_available(self) -> None:
+        for platforms in (
+            ("linux64", "osx64", "win64"),
+            BUNDLE_PLATFORMS,
+        ):
+            with self.subTest(platforms=platforms):
+                release = {
+                    "tag_name": "codeql-bundle-v1.2.3",
+                    "assets": [
+                        {
+                            "browser_download_url": f"https://example.test/{source_asset_name(platform)}",
+                            "digest": f"sha256:{index:064x}",
+                            "name": source_asset_name(platform),
+                            "size": 100,
+                        }
+                        for index, platform in enumerate(platforms, start=1)
+                    ],
+                }
+
+                assets = _release_source_assets(release)
+
+                self.assertEqual(
+                    platforms, tuple(asset.platform for asset in assets)
+                )
+
+    def test_arm64_catalog_entry_can_be_added_to_catalog(self) -> None:
         runner = CliRunner()
         with runner.isolated_filesystem():
             root = Path.cwd()
@@ -69,6 +94,7 @@ class CacheCliTests(unittest.TestCase):
             assets.mkdir()
             cache_asset = assets / "codeql-compilation-cache-cpp.tar.gz"
             cache_asset.write_bytes(b"cache")
+            plan_path = root / "plan.json"
             plan = {
                 "cache_format": 1,
                 "cache_release": "codeql-compilation-cache-v1.2.3",
@@ -77,19 +103,14 @@ class CacheCliTests(unittest.TestCase):
                 "release": "codeql-bundle-v1.2.3",
                 "source_assets": [
                     {
-                        "name": name,
+                        "name": source_asset_name(platform),
                         "platform": platform,
                         "sha256": str(index) * 64,
                         "size": 100,
-                        "url": f"https://example.test/{name}",
+                        "url": f"https://example.test/{source_asset_name(platform)}",
                     }
-                    for index, (platform, name) in enumerate(
-                        [
-                            ("all", "codeql-bundle.tar.gz"),
-                            ("linux64", "codeql-bundle-linux64.tar.gz"),
-                            ("osx64", "codeql-bundle-osx64.tar.gz"),
-                            ("win64", "codeql-bundle-win64.tar.gz"),
-                        ],
+                    for index, platform in enumerate(
+                        BUNDLE_PLATFORMS,
                         start=1,
                     )
                 ],
@@ -102,28 +123,25 @@ class CacheCliTests(unittest.TestCase):
                     }
                 ],
             }
-            plan_path = root / "plan.json"
             plan_path.write_text(json.dumps(plan))
             catalog_path = root / "catalog.json"
             catalog_path.write_text(
                 json.dumps({"schema_version": 1, "bundles": []})
             )
             entry_path = root / "entry.json"
+            catalog_entry_args = [
+                "catalog-entry",
+                "--plan",
+                str(plan_path),
+                "--assets-dir",
+                str(assets),
+                "--validated-platform",
+                "linux-arm64",
+                "--output",
+                str(entry_path),
+            ]
 
-            result = runner.invoke(
-                main,
-                [
-                    "catalog-entry",
-                    "--plan",
-                    str(plan_path),
-                    "--assets-dir",
-                    str(assets),
-                    "--validated-platform",
-                    "linux64",
-                    "--output",
-                    str(entry_path),
-                ],
-            )
+            result = runner.invoke(main, catalog_entry_args)
             self.assertEqual(0, result.exit_code, result.output)
 
             result = runner.invoke(
@@ -139,7 +157,24 @@ class CacheCliTests(unittest.TestCase):
             self.assertEqual(0, result.exit_code, result.output)
 
             catalog = CatalogLoader().load(str(catalog_path))
-            self.assertIsNotNone(catalog.find_release("codeql-bundle-v1.2.3"))
+            bundle = catalog.find_release("codeql-bundle-v1.2.3")
+            self.assertIsNotNone(bundle)
+            self.assertEqual(("linux-arm64",), bundle.validated_platforms)
+
+            plan["source_assets"] = [
+                asset
+                for asset in plan["source_assets"]
+                if asset["platform"] != "linux-arm64"
+            ]
+            plan_path.write_text(json.dumps(plan))
+            result = runner.invoke(main, catalog_entry_args)
+
+            self.assertNotEqual(0, result.exit_code)
+            self.assertIn(
+                "Release plan has no source bundle for validated platform(s): "
+                "linux-arm64.",
+                result.output,
+            )
 
 
 if __name__ == "__main__":

@@ -36,6 +36,7 @@ CODEQL_ACTION_REPOSITORY = "github/codeql-action"
 CACHE_FORMAT_VERSION = 1
 DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 CATALOG_REFRESH_SECONDS = 60 * 60
+BUNDLE_PLATFORMS = ("linux64", "linux-arm64", "osx64", "win64")
 RELEASE_PATTERN = re.compile(r"^codeql-bundle-v\d+\.\d+\.\d+$")
 CACHE_RELEASE_PATTERN = re.compile(
     r"^codeql-compilation-cache-v\d+\.\d+\.\d+(?:-[A-Za-z0-9._-]+)?$"
@@ -172,12 +173,18 @@ class SupportedBundle:
         }
 
     def source_asset_for_platform(self, platform_name: str) -> Optional[SourceAsset]:
-        return next(
+        asset = next(
             (
                 asset
                 for asset in self.source_assets
                 if asset.platform == platform_name
             ),
+            None,
+        )
+        if asset is not None:
+            return asset
+        return next(
+            (asset for asset in self.source_assets if asset.platform == "all"),
             None,
         )
 
@@ -323,7 +330,12 @@ def default_cache_dir() -> Path:
 def current_bundle_platform() -> str:
     system = platform.system()
     if system == "Linux":
-        return "linux64"
+        machine = platform.machine().lower()
+        if machine in {"x86_64", "amd64"}:
+            return "linux64"
+        if machine in {"aarch64", "arm64"}:
+            return "linux-arm64"
+        raise CacheException(f"Unsupported Linux architecture: {machine}")
     if system == "Darwin":
         return "osx64"
     if system == "Windows":
@@ -721,8 +733,6 @@ class BundleSourceResolver:
         bundle = self.catalog.find_release(release)
         if bundle:
             asset = bundle.source_asset_for_platform(platform_name)
-            if asset is None and platform_name != "all":
-                asset = bundle.source_asset_for_platform("all")
             if asset is None:
                 raise CatalogException(
                     f"Bundle {release} has no source asset for {platform_name}."
@@ -1009,19 +1019,20 @@ def write_json(path: Path, value: dict[str, Any]) -> None:
 def source_asset_name(platform_name: str) -> str:
     if platform_name == "all":
         return "codeql-bundle.tar.gz"
-    if platform_name not in {"linux64", "osx64", "win64"}:
+    if platform_name not in BUNDLE_PLATFORMS:
         raise CacheException(f"Unsupported bundle platform: {platform_name}")
     return f"codeql-bundle-{platform_name}.tar.gz"
 
 
 def source_platform_for_request(requested_platforms: Iterable[str]) -> str:
-    requested = tuple(requested_platforms)
+    requested = set(requested_platforms)
     current = current_bundle_platform()
-    if not requested:
-        return "all"
-    if requested == (current,):
-        return current
-    return "all"
+    if requested and requested != {current}:
+        raise CacheException(
+            f"Release tags can only build for the current platform ({current}); "
+            f"requested {', '.join(sorted(requested))}."
+        )
+    return current
 
 
 def github_asset_digest(asset: dict[str, Any]) -> Optional[str]:
