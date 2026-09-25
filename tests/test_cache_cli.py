@@ -85,7 +85,6 @@ class CacheCliTests(unittest.TestCase):
                     }
                     for index, (platform, name) in enumerate(
                         [
-                            ("all", "codeql-bundle.tar.gz"),
                             ("linux64", "codeql-bundle-linux64.tar.gz"),
                             ("osx64", "codeql-bundle-osx64.tar.gz"),
                             ("win64", "codeql-bundle-win64.tar.gz"),

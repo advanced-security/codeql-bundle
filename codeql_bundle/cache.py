@@ -36,6 +36,7 @@ CODEQL_ACTION_REPOSITORY = "github/codeql-action"
 CACHE_FORMAT_VERSION = 1
 DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 CATALOG_REFRESH_SECONDS = 60 * 60
+BUNDLE_PLATFORMS = ("linux64", "linux-arm64", "osx64", "win64")
 RELEASE_PATTERN = re.compile(r"^codeql-bundle-v\d+\.\d+\.\d+$")
 CACHE_RELEASE_PATTERN = re.compile(
     r"^codeql-compilation-cache-v\d+\.\d+\.\d+(?:-[A-Za-z0-9._-]+)?$"
@@ -731,8 +732,6 @@ class BundleSourceResolver:
         )
         if bundle:
             asset = bundle.source_asset_for_platform(platform_name)
-            if asset is None and platform_name != "all":
-                asset = bundle.source_asset_for_platform("all")
             if asset is None:
                 raise CatalogException(
                     f"Bundle {release} has no source asset for {platform_name}."
@@ -1019,21 +1018,22 @@ def write_json(path: Path, value: dict[str, Any]) -> None:
 def source_asset_name(platform_name: str) -> str:
     if platform_name == "all":
         return "codeql-bundle.tar.gz"
-    if platform_name not in {"linux64", "linux-arm64", "osx64", "win64"}:
+    if platform_name not in BUNDLE_PLATFORMS:
         raise CacheException(f"Unsupported bundle platform: {platform_name}")
     return f"codeql-bundle-{platform_name}.tar.gz"
 
 
 def source_platform_for_request(requested_platforms: Iterable[str]) -> str:
-    requested = tuple(requested_platforms)
+    requested = set(requested_platforms)
     current = current_bundle_platform()
-    if current == "linux-arm64":
-        return current
-    if not requested:
-        return "all"
-    if requested == (current,):
-        return current
-    return "all"
+    if requested and requested != {current}:
+        raise CacheException(
+            "Release tags can only build for the current platform "
+            f"({current}); requested {', '.join(sorted(requested))}. "
+            "Run codeql-bundle on each target platform or provide a local "
+            "bundle containing every requested platform."
+        )
+    return current
 
 
 def github_asset_digest(asset: dict[str, Any]) -> Optional[str]:

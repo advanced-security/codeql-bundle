@@ -792,28 +792,32 @@ class CustomBundle(Bundle):
 
         config = load_config(config_path)
 
-        if platform.system() == "Windows":
-            keytool = "tools/win64/java/bin/keytool.exe"
-        elif platform.system() == "Linux":
-            keytool = "tools/linux64/java/bin/keytool"
-        elif platform.system() == "Darwin":
-            keytool = "tools/osx64/java/bin/keytool"
-        else:
-            raise BundleException(f"Unsupported platform {platform.system()}")
-
-        keytool = self.bundle_path / keytool
-        if not keytool.exists():
-            raise BundleException(f"Keytool {keytool} does not exist.")
-
-        keystores: list[str] = [
-            "tools/win64/java/lib/security/cacerts",
-            "tools/linux64/java/lib/security/cacerts",
-            "tools/osx64/java/lib/security/cacerts",
-            "tools/osx64/java-aarch64/lib/security/cacerts",
-        ]
-
         # Add the certificates to the Java keystores
         if "CodeQLBundleAdditionalCertificates" in config:
+            keytool_paths = {
+                "linux64": "tools/linux64/java/bin/keytool",
+                "linux-arm64": "tools/linux-arm64/java/bin/keytool",
+                "osx64": "tools/osx64/java/bin/keytool",
+                "win64": "tools/win64/java/bin/keytool.exe",
+            }
+            keytool = self.bundle_path / keytool_paths[current_bundle_platform()]
+            if not keytool.exists():
+                raise BundleException(f"Keytool {keytool} does not exist.")
+
+            keystores = [
+                self.bundle_path / path
+                for path in [
+                    "tools/win64/java/lib/security/cacerts",
+                    "tools/linux64/java/lib/security/cacerts",
+                    "tools/linux-arm64/java/lib/security/cacerts",
+                    "tools/osx64/java/lib/security/cacerts",
+                    "tools/osx64/java-aarch64/lib/security/cacerts",
+                ]
+                if (self.bundle_path / path).exists()
+            ]
+            if not keystores:
+                raise BundleException("The bundle contains no Java keystores.")
+
             for cert in config["CodeQLBundleAdditionalCertificates"]:
                 src = workspace_path / Path(cert["Source"])
                 src = src.resolve()
@@ -825,9 +829,6 @@ class CustomBundle(Bundle):
                     raise BundleException(f"Certificate file {src} does not exist.")
 
                 for keystore in keystores:
-                    keystore = self.bundle_path / keystore
-                    if not keystore.exists():
-                        raise BundleException(f"Keystore {keystore} does not exist.")
                     logging.info(f"Adding certificate {src} to keystore {keystore}")
                     subprocess.run(
                         [

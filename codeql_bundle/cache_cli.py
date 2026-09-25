@@ -14,6 +14,7 @@ import click
 from semantic_version import Version
 
 from codeql_bundle.cache import (
+    BUNDLE_PLATFORMS,
     CACHE_FORMAT_VERSION,
     CODEQL_ACTION_REPOSITORY,
     BundleCatalog,
@@ -50,7 +51,8 @@ from codeql_bundle.helpers.bundle import (
 
 logger = logging.getLogger(__name__)
 
-SOURCE_PLATFORMS = ("all", "linux64", "osx64", "win64")
+# Linux ARM64 compilation-cache publication remains out of scope.
+SOURCE_PLATFORMS = ("linux64", "osx64", "win64")
 MAX_RELEASE_ASSET_SIZE = 2 * 1024 * 1024 * 1024
 DEFAULT_COMPILATION_CACHE_SIZE_MB = 1536
 
@@ -142,7 +144,7 @@ def prune_cache(cache_dir: Path, max_age_days: float, dry_run: bool) -> None:
     "--platform",
     "platforms",
     multiple=True,
-    type=click.Choice(["linux64", "osx64", "win64"]),
+    type=click.Choice(BUNDLE_PLATFORMS),
 )
 @click.option(
     "--cache-dir",

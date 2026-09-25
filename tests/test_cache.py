@@ -13,6 +13,7 @@ from unittest.mock import patch
 from semantic_version import Version
 
 from codeql_bundle.cache import (
+    BUNDLE_PLATFORMS,
     CACHE_FORMAT_VERSION,
     BundleCatalog,
     BundleSourceResolver,
@@ -231,19 +232,18 @@ class ArtifactTests(unittest.TestCase):
     def test_release_source_is_runnable_on_current_platform(self) -> None:
         current = current_bundle_platform()
         other = next(
-            platform
-            for platform in ("linux64", "osx64", "win64")
-            if platform != current
+            platform for platform in BUNDLE_PLATFORMS if platform != current
         )
-        if current == "linux-arm64":
-            self.assertEqual(current, source_platform_for_request(()))
-            return
-        self.assertEqual("all", source_platform_for_request(()))
+        self.assertEqual(current, source_platform_for_request(()))
         self.assertEqual(current, source_platform_for_request((current,)))
-        self.assertEqual("all", source_platform_for_request((other,)))
-        self.assertEqual(
-            "all", source_platform_for_request(("linux64", "win64"))
-        )
+        with self.assertRaisesRegex(
+            CacheException, "only build for the current platform"
+        ):
+            source_platform_for_request((other,))
+        with self.assertRaisesRegex(
+            CacheException, "only build for the current platform"
+        ):
+            source_platform_for_request((current, other))
 
     def test_linux_arm64_platform(self) -> None:
         with patch(
@@ -367,10 +367,7 @@ class ArtifactTests(unittest.TestCase):
                     BundleCatalog([]),
                     root / "downloads",
                     release_client=ReleaseClient(),
-                ).resolve(
-                    "codeql-bundle-v1.2.3",
-                    [current_bundle_platform()],
-                )
+                ).resolve("codeql-bundle-v1.2.3")
 
             self.assertEqual(sha256_file(archive), resolved.digest)
 

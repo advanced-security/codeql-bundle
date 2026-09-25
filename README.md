@@ -24,8 +24,8 @@ python3.11 -m pip install https://github.com/advanced-security/codeql-bundle/rel
 ## Usage
 
 The source bundle can be an existing local archive or directory, a
-`github/codeql-action` release tag, or an HTTP(S) URL. Release tags and URLs are
-downloaded into a persistent local cache.
+`github/codeql-action` release tag, or an HTTP(S) URL. Release tags select the
+current platform's bundle, and downloads are stored in a persistent local cache.
 
 The CodeQL bundle application requires a [CodeQL workspace](https://codeql.github.com/docs/codeql-cli/about-codeql-workspaces/) to locate the packs you want to include in a custom bundle.
 You can see the packs available in your workspace by running `codeql pack ls -- <dir>` where `<dir>` is the root directory of your CodeQL workspace.
@@ -37,19 +37,24 @@ with the command:
 codeql-bundle --bundle codeql-bundle-v2.26.1 --output codeql-custom-bundle.tar.gz --workspace <path-to-workspace> --log INFO <packs>
 ```
 
-If the source bundle is the platform agnostic bundle then you can create platform specific bundles to reduce the size of the used bundle(s).
-The following example creates bundles for the platforms included in that source archive.
+The upstream all-platform bundle is
+[deprecated](https://github.blog/changelog/2026-09-22-deprecation-notice-all-platform-codeql-bundle/)
+and will be removed in mid-March 2027. Release tags therefore use a
+platform-specific source and can only build for the current platform. Run
+`codeql-bundle` on each target platform.
 
 ```bash
-codeql-bundle --bundle <path-to-platform-agnostic-bundle> --output <path-to-bundles-dir> --workspace <path-to-workspace> --log INFO -p linux64 -p osx64 -p win64 <packs>
+codeql-bundle --bundle codeql-bundle-v2.27.0 --output <path-to-bundles-dir> --workspace <path-to-workspace> --log INFO -p linux64 <packs>
 ```
 
-Linux ARM64 binaries are not included in the platform-agnostic upstream bundle.
-Create a Linux ARM64 custom bundle on a Linux ARM64 host:
+On a Linux ARM64 host, use the native target:
 
 ```bash
 codeql-bundle --bundle codeql-bundle-v2.27.0 --output <path-to-bundles-dir> --workspace <path-to-workspace> --log INFO -p linux-arm64 <packs>
 ```
+
+Existing local all-platform archives remain supported for creating multiple
+platform-specific bundles.
 
 ### Compilation caches
 
@@ -113,11 +118,11 @@ codeql-bundle-cache verify-all \
   --assets-dir dist
 ```
 
-`plan-release` validates upstream release metadata and records every source
-asset. `build` compiles the real standard query packs into a per-language cache
-bounded to 1536 MiB and requires a second real compilation to report a cache
-hit. `verify-all` repeats that check using the current platform's upstream
-bundle.
+`plan-release` validates upstream release metadata and records the supported
+platform-specific source assets. `build` compiles the real standard query packs
+into a per-language cache bounded to 1536 MiB and requires a second real
+compilation to report a cache hit. `verify-all` repeats that check using the
+current platform's upstream bundle.
 
 After release assets have been published, `catalog-entry`, `verify-entry`, and
 `update-catalog` create, download-test, and insert the candidate catalog entry.
