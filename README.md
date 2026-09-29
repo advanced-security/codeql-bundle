@@ -18,7 +18,7 @@ For more details on CodeQL customization packs see the section [CodeQL customiza
 The CodeQL bundle application can be installed using `pip` with the command:
 
 ```bash
-python3.11 -m pip install https://github.com/advanced-security/codeql-bundle/releases/download/v0.5.0/codeql_bundle-0.5.0-py3-none-any.whl
+python3.11 -m pip install https://github.com/advanced-security/codeql-bundle/releases/download/v0.6.0/codeql_bundle-0.6.0-py3-none-any.whl
 ```
 
 ## Usage
@@ -37,8 +37,8 @@ with the command:
 codeql-bundle --bundle codeql-bundle-v2.26.1 --output codeql-custom-bundle.tar.gz --workspace <path-to-workspace> --log INFO <packs>
 ```
 
-If the source bundle is the platform agnostic bundle then you can create platform specific bundles to reduce the size of the used bundle(s).
-The following example creates platform specific bundles for all the currently supported platforms.
+Targets include `linux64`, `linux-arm64`, `osx64`, and `win64`. Local
+all-platform archives can build for multiple targets.
 
 ```bash
 codeql-bundle --bundle <path-to-platform-agnostic-bundle> --output <path-to-bundles-dir> --workspace <path-to-workspace> --log INFO -p linux64 -p osx64 -p win64 <packs>
