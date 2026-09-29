@@ -65,7 +65,9 @@ logger = logging.getLogger(__name__)
     "-p",
     "--platform",
     multiple=True,
-    type=click.Choice(["linux64", "osx64", "win64"], case_sensitive=False),
+    type=click.Choice(
+        ["linux64", "linux-arm64", "osx64", "win64"], case_sensitive=False
+    ),
     help="Target platform for the bundle",
 )
 @click.option(
