@@ -520,6 +520,179 @@
         "osx64",
         "win64"
       ]
+    },
+    {
+      "release": "codeql-bundle-v2.27.6",
+      "cli_version": "2.27.6",
+      "source_repository": "github/codeql-action",
+      "pack_fingerprint": "39f5b91bb5e3e998a06ce32c1d5fac0c45a57cbd5314fd61885b56c717f12ee8",
+      "source_assets": [
+        {
+          "name": "codeql-bundle.tar.gz",
+          "url": "https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.27.6/codeql-bundle.tar.gz",
+          "sha256": "87570b84079f9316f72caf3cbada7defcfbbd2c315a786cf14c21d95e1ab6a04",
+          "size": 1745008079,
+          "platform": "all"
+        },
+        {
+          "name": "codeql-bundle-linux64.tar.gz",
+          "url": "https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.27.6/codeql-bundle-linux64.tar.gz",
+          "sha256": "89824352b54c92eaff54dfcd27cfada6cb579a4c09d6668eba01a32d5a63745d",
+          "size": 696152722,
+          "platform": "linux64"
+        },
+        {
+          "name": "codeql-bundle-osx64.tar.gz",
+          "url": "https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.27.6/codeql-bundle-osx64.tar.gz",
+          "sha256": "991a83be952f0276c1901bc27b40f4898a2d44a91ab752607aa0ce7c5c17e27a",
+          "size": 1260469923,
+          "platform": "osx64"
+        },
+        {
+          "name": "codeql-bundle-win64.tar.gz",
+          "url": "https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.27.6/codeql-bundle-win64.tar.gz",
+          "sha256": "4e66fa176fd169c018aad7b2197cc2c24daf498f7558be62e9bde3d7fb2b495b",
+          "size": 699979468,
+          "platform": "win64"
+        }
+      ],
+      "cache_release": "codeql-compilation-cache-v2.27.6",
+      "cache_format": 1,
+      "compilation_caches": {
+        "codeql/actions-all": {
+          "language": "actions",
+          "query_packs": [
+            "codeql/actions-queries@0.6.41"
+          ],
+          "asset": {
+            "name": "codeql-compilation-cache-actions.tar.gz",
+            "url": "https://github.com/advanced-security/codeql-bundle/releases/download/codeql-compilation-cache-v2.27.6/codeql-compilation-cache-actions.tar.gz",
+            "sha256": "57728074a36137793c1bedf4a0ed54ef06687ce81cff8534877d3ddae65e2536",
+            "size": 10544278
+          }
+        },
+        "codeql/cpp-all": {
+          "language": "cpp",
+          "query_packs": [
+            "codeql/cpp-examples@0.0.0",
+            "codeql/cpp-queries@1.10.2"
+          ],
+          "asset": {
+            "name": "codeql-compilation-cache-cpp.tar.gz",
+            "url": "https://github.com/advanced-security/codeql-bundle/releases/download/codeql-compilation-cache-v2.27.6/codeql-compilation-cache-cpp.tar.gz",
+            "sha256": "3d7894a0a60e943ed5fbe31ff0338fbfcddeffe8638fd62387865a4c9208188f",
+            "size": 64708263
+          }
+        },
+        "codeql/csharp-all": {
+          "language": "csharp",
+          "query_packs": [
+            "codeql/csharp-examples@0.0.0",
+            "codeql/csharp-queries@1.11.2"
+          ],
+          "asset": {
+            "name": "codeql-compilation-cache-csharp.tar.gz",
+            "url": "https://github.com/advanced-security/codeql-bundle/releases/download/codeql-compilation-cache-v2.27.6/codeql-compilation-cache-csharp.tar.gz",
+            "sha256": "6037294061683264f74afdd36bc3fd778aa1aeb46a40c3919e41e36f736f5ec0",
+            "size": 51195826
+          }
+        },
+        "codeql/go-all": {
+          "language": "go",
+          "query_packs": [
+            "codeql/go-examples@0.0.0",
+            "codeql/go-queries@1.6.16"
+          ],
+          "asset": {
+            "name": "codeql-compilation-cache-go.tar.gz",
+            "url": "https://github.com/advanced-security/codeql-bundle/releases/download/codeql-compilation-cache-v2.27.6/codeql-compilation-cache-go.tar.gz",
+            "sha256": "407a9bc296415ba1799d029311199a19d651e4afd3fa2bef9fd15dace46b7fda",
+            "size": 38608974
+          }
+        },
+        "codeql/java-all": {
+          "language": "java",
+          "query_packs": [
+            "codeql/java-examples@0.0.0",
+            "codeql/java-queries@1.12.2"
+          ],
+          "asset": {
+            "name": "codeql-compilation-cache-java.tar.gz",
+            "url": "https://github.com/advanced-security/codeql-bundle/releases/download/codeql-compilation-cache-v2.27.6/codeql-compilation-cache-java.tar.gz",
+            "sha256": "a3925535e18c44889861f820a8ae398a23350981ed4018dae2c5976a589b1c57",
+            "size": 348889278
+          }
+        },
+        "codeql/javascript-all": {
+          "language": "javascript",
+          "query_packs": [
+            "codeql/actions-queries@0.6.41",
+            "codeql/javascript-examples@0.0.0",
+            "codeql/javascript-queries@2.5.2"
+          ],
+          "asset": {
+            "name": "codeql-compilation-cache-javascript.tar.gz",
+            "url": "https://github.com/advanced-security/codeql-bundle/releases/download/codeql-compilation-cache-v2.27.6/codeql-compilation-cache-javascript.tar.gz",
+            "sha256": "2be34bf11a79fa7ded6ef63d7225da5f6ee6caa52d754299bc9830ed0578b6eb",
+            "size": 129775600
+          }
+        },
+        "codeql/python-all": {
+          "language": "python",
+          "query_packs": [
+            "codeql/python-examples@0.0.0",
+            "codeql/python-queries@1.9.2"
+          ],
+          "asset": {
+            "name": "codeql-compilation-cache-python.tar.gz",
+            "url": "https://github.com/advanced-security/codeql-bundle/releases/download/codeql-compilation-cache-v2.27.6/codeql-compilation-cache-python.tar.gz",
+            "sha256": "28aba14e2174e390358940f97640cd2144cd3dda7542a983b925a984d82fae1d",
+            "size": 55436091
+          }
+        },
+        "codeql/ruby-all": {
+          "language": "ruby",
+          "query_packs": [
+            "codeql/ruby-examples@0.0.0",
+            "codeql/ruby-queries@1.7.2"
+          ],
+          "asset": {
+            "name": "codeql-compilation-cache-ruby.tar.gz",
+            "url": "https://github.com/advanced-security/codeql-bundle/releases/download/codeql-compilation-cache-v2.27.6/codeql-compilation-cache-ruby.tar.gz",
+            "sha256": "44f47a0b8168c70824d91c71262e68a4ae828cfe76d15d6ea5df86a89280bae2",
+            "size": 43611955
+          }
+        },
+        "codeql/rust-all": {
+          "language": "rust",
+          "query_packs": [
+            "codeql/rust-queries@0.1.48"
+          ],
+          "asset": {
+            "name": "codeql-compilation-cache-rust.tar.gz",
+            "url": "https://github.com/advanced-security/codeql-bundle/releases/download/codeql-compilation-cache-v2.27.6/codeql-compilation-cache-rust.tar.gz",
+            "sha256": "3e18fb32d1c14e0db7b100788861fe47e5c87199222bcd3be93157f50150c961",
+            "size": 15113832
+          }
+        },
+        "codeql/swift-all": {
+          "language": "swift",
+          "query_packs": [
+            "codeql/swift-queries@1.4.2"
+          ],
+          "asset": {
+            "name": "codeql-compilation-cache-swift.tar.gz",
+            "url": "https://github.com/advanced-security/codeql-bundle/releases/download/codeql-compilation-cache-v2.27.6/codeql-compilation-cache-swift.tar.gz",
+            "sha256": "d7393a4e5fdccc932d77b9c26de7f06536bccf4f8710745f95f42b15387e3f24",
+            "size": 22002563
+          }
+        }
+      },
+      "validated_platforms": [
+        "linux64",
+        "osx64",
+        "win64"
+      ]
     }
   ]
 }
